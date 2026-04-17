@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -24,7 +25,7 @@ from app.models.schemas import (
 )
 from app.ranking.source_ranker import SourceRanker
 from app.storage.repositories import TaskRepository
-from app.utils.text import guess_domain
+from app.utils.text import guess_domain, keyword_overlap_score
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,12 @@ class ResearchOrchestrator:
 
             await repo.update_task(task, status=TaskStatus.researching, current_step="Browsing sources")
             async with BrowserWorker() as browser:
-                for search_query in plan.search_queries[:2]:
+                target_sources = max(6, min(plan.source_limit, 10))
+                per_query_limit = 4
+                max_per_domain = 2
+                domain_counter: dict[str, int] = defaultdict(int)
+
+                for search_query in plan.search_queries[:4]:
                     await repo.add_action(
                         BrowserAction(
                             task_id=task_id,
@@ -77,9 +83,15 @@ class ResearchOrchestrator:
                             metadata={},
                         )
                     )
-                    results = await browser.web_search(search_query, limit=plan.source_limit)
-                    for index, result in enumerate(results[: plan.source_limit]):
+                    results = await browser.web_search(search_query, limit=per_query_limit)
+                    for index, result in enumerate(results[:per_query_limit]):
                         try:
+                            candidate_domain = guess_domain(result.url)
+                            if _should_skip_result(query.text, result.title, result.snippet, candidate_domain):
+                                continue
+                            if domain_counter[candidate_domain] >= max_per_domain:
+                                continue
+
                             screenshot_path = self.settings.screenshot_dir / f"{task_id}_{len(sources)}.png"
                             page = await browser.capture_page(result.url, screenshot_file=screenshot_path)
                             source = SourceItem(
@@ -94,6 +106,7 @@ class ResearchOrchestrator:
                                 metadata=page.metadata,
                             )
                             sources.append(source)
+                            domain_counter[source.domain] += 1
                             evidence.extend(
                                 self.extractor.extract(
                                     task_id=task_id,
@@ -129,9 +142,9 @@ class ResearchOrchestrator:
                                     created_at=_utcnow(),
                                 )
                             )
-                        if len(sources) >= plan.source_limit:
+                        if len(sources) >= target_sources:
                             break
-                    if len(sources) >= plan.source_limit:
+                    if len(sources) >= target_sources:
                         break
 
                 if intent.requires_youtube:
@@ -154,7 +167,8 @@ class ResearchOrchestrator:
                         best_video = sorted(video_candidates, key=lambda item: item.rank_score, reverse=True)[0]
 
             await repo.update_task(task, status=TaskStatus.ranking, current_step="Ranking sources")
-            ranked_sources = self.ranker.rank(query.text, sources)[: self.settings.max_web_sources]
+            ranked_limit = max(self.settings.max_web_sources, 6)
+            ranked_sources = self.ranker.rank(query.text, sources)[:ranked_limit]
             await repo.replace_sources(task_id, ranked_sources)
             await repo.replace_evidence(task_id, evidence)
 
@@ -218,3 +232,21 @@ def _utcnow() -> datetime:
 
 
 task_runner = TaskRunner()
+
+
+def _should_skip_result(query: str, title: str, snippet: str, domain: str) -> bool:
+    blocked_domain_hints = {
+        "dictionary",
+        "dictionaries",
+        "wiktionary.org",
+        "thesaurus.com",
+        "vocabulary.com",
+    }
+    normalized_domain = domain.lower()
+    if any(hint in normalized_domain for hint in blocked_domain_hints):
+        return True
+    lowered_title = title.lower()
+    if any(term in lowered_title for term in {" noun ", "definition", "pronunciation"}):
+        return True
+    overlap = keyword_overlap_score(query, f"{title} {snippet or ''}")
+    return overlap < 0.12

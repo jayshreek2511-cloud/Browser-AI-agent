@@ -7,78 +7,93 @@
     <link rel="stylesheet" href="/ui/styles.css" />
   </head>
   <body>
-    <main class="layout">
-      <section class="hero">
+    <main class="app-shell">
+      <header class="topbar">
         <div>
           <p class="eyebrow">Stage 1 + Stage 2 MVP</p>
           <h1>General Browser AI Agent</h1>
-          <p class="lede">
-            Evidence-first browser research with live progress, source inspection, and answer synthesis.
-          </p>
+          <p class="lede">Evidence-first browser research with live progress and transparent execution.</p>
         </div>
-        <form id="query-form" class="query-form">
-          <label for="query">Ask the agent to research a topic</label>
-          <textarea id="query" placeholder="Example: Compare the latest approaches to retrieval augmented generation and recommend one good explainer video."></textarea>
-          <button type="submit">Run Research Task</button>
-        </form>
-      </section>
+      </header>
 
-      <section class="grid">
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Task Status</h2>
-            <span id="status-badge" class="badge">Idle</span>
-          </div>
-          <div class="meta">
-            <p><strong>Current step:</strong> <span id="current-step">Waiting for a task.</span></p>
-            <p><strong>Task ID:</strong> <span id="task-id">None</span></p>
-          </div>
-          <div id="progress-log" class="feed"></div>
-          <div id="error-box" class="error-box" hidden></div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Live Browser Preview</h2>
-          </div>
-          <div class="preview-shell">
-            <img id="browser-preview" alt="Latest browser screenshot" />
-            <div id="preview-empty" class="empty">No live browser frame yet.</div>
-          </div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Final Answer</h2>
-          </div>
-          <div id="answer-box" class="answer-box">
-            <p>The agent's answer will appear here.</p>
-          </div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Ranked Sources</h2>
-          </div>
-          <div id="sources-list" class="stack"></div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Evidence</h2>
-          </div>
-          <div id="evidence-list" class="stack"></div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
-            <h2>YouTube Recommendation</h2>
-          </div>
-          <div id="video-card" class="answer-box">
-            <p>No video recommendation yet.</p>
-          </div>
+      <section id="chat-thread" class="chat-thread">
+        <article class="message assistant-message">
+          <p>Ask a research question to begin. I will plan, browse, verify, and answer with evidence.</p>
         </article>
       </section>
+
+      <section class="panel-stack">
+        <div class="row two-col">
+          <article class="panel">
+            <div class="panel-header">
+              <h2>Task Status</h2>
+              <span id="status-badge" class="badge">Idle</span>
+            </div>
+            <div class="meta">
+              <p><strong>Current step:</strong> <span id="current-step">Waiting for a task.</span></p>
+              <p><strong>Task ID:</strong> <span id="task-id">None</span></p>
+            </div>
+            <div id="progress-log" class="feed"></div>
+            <div id="error-box" class="error-box" hidden></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h2>Live Browser Preview</h2>
+            </div>
+            <div class="preview-shell">
+              <img id="browser-preview" alt="Latest browser screenshot" />
+              <div id="preview-empty" class="empty">No live browser frame yet.</div>
+            </div>
+            <div id="preview-strip" class="preview-strip"></div>
+          </article>
+        </div>
+
+        <div class="row two-col">
+          <article class="panel">
+            <div class="panel-header">
+              <h2>Final Answer</h2>
+            </div>
+            <div id="answer-box" class="answer-box">
+              <p>The agent's answer will appear here.</p>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h2>YouTube Recommendation</h2>
+            </div>
+            <div id="video-card" class="answer-box">
+              <p>No video recommendation yet.</p>
+            </div>
+          </article>
+        </div>
+
+        <div class="row two-col">
+          <article class="panel">
+            <div class="panel-header">
+              <h2>Ranked Sources</h2>
+            </div>
+            <div id="sources-list" class="stack"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h2>Evidence</h2>
+            </div>
+            <div id="evidence-list" class="stack"></div>
+          </article>
+        </div>
+      </section>
+
+      <form id="query-form" class="composer">
+        <label class="sr-only" for="query">Ask the agent to research a topic</label>
+        <textarea
+          id="query"
+          placeholder="Ask anything... Example: Compare retrieval augmented generation and long-context prompting, then recommend one useful YouTube explainer."
+        ></textarea>
+        <button type="submit">Run Research Task</button>
+      </form>
     </main>
     <script src="/ui/app.js" defer></script>
   </body>

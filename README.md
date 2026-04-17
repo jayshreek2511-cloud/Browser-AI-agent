@@ -32,6 +32,12 @@ playwright install chromium
 python -m uvicorn app.main:app --reload
 ```
 
+On Windows, if Playwright fails to initialize during tasks, run without reload:
+
+```bash
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir .
+```
+
 4. Open `http://localhost:8000/`.
 
 ## How To Check The Agent

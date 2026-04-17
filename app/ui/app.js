@@ -1,5 +1,6 @@
 const form = document.getElementById("query-form");
 const queryInput = document.getElementById("query");
+const chatThread = document.getElementById("chat-thread");
 const statusBadge = document.getElementById("status-badge");
 const currentStep = document.getElementById("current-step");
 const taskIdEl = document.getElementById("task-id");
@@ -7,6 +8,7 @@ const progressLog = document.getElementById("progress-log");
 const errorBox = document.getElementById("error-box");
 const preview = document.getElementById("browser-preview");
 const previewEmpty = document.getElementById("preview-empty");
+const previewStrip = document.getElementById("preview-strip");
 const answerBox = document.getElementById("answer-box");
 const sourcesList = document.getElementById("sources-list");
 const evidenceList = document.getElementById("evidence-list");
@@ -14,11 +16,16 @@ const videoCard = document.getElementById("video-card");
 
 let activeTaskId = null;
 let pollHandle = null;
+let previewFrames = [];
+let previewFrameIndex = 0;
+let previewTimer = null;
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const query = queryInput.value.trim();
   if (!query) return;
+
+  appendUserMessage(query);
 
   const response = await fetch("/api/tasks", {
     method: "POST",
@@ -32,6 +39,7 @@ form.addEventListener("submit", async (event) => {
   currentStep.textContent = "Task created";
   progressLog.innerHTML = "";
   clearPanels();
+  appendAssistantMessage("Research task accepted. Planning and browsing started.");
   startPolling();
 });
 
@@ -57,11 +65,17 @@ function renderTask(task) {
   currentStep.textContent = task.current_step;
   renderActions(task.actions || []);
   renderErrors(task.errors || []);
-  renderPreview(task.latest_screenshot);
+  renderPreview(task.actions || [], task.latest_screenshot);
   renderAnswer(task.answer);
   renderSources(task.sources || []);
   renderEvidence(task.evidence || []);
   renderVideo(task.answer?.best_video || null);
+
+  if (task.status === "completed" && task.answer) {
+    appendAssistantMessage("Research complete. Final answer and evidence are available below.");
+  } else if (task.status === "failed") {
+    appendAssistantMessage("Task failed. Check Error Details for context.");
+  }
 }
 
 function renderActions(actions) {
@@ -79,16 +93,31 @@ function renderActions(actions) {
     .join("");
 }
 
-function renderPreview(screenshotPath) {
-  if (!screenshotPath) {
+function renderPreview(actions, latestScreenshotPath) {
+  const screenshots = Array.from(
+    new Set(
+      actions
+        .map((action) => action.screenshot_path)
+        .filter(Boolean)
+        .map(normalizePath)
+    )
+  );
+
+  previewFrames = screenshots;
+  renderPreviewStrip();
+
+  if (!screenshots.length && !latestScreenshotPath) {
+    stopPreviewPlayback();
     preview.style.display = "none";
     previewEmpty.style.display = "block";
     return;
   }
-  const normalized = screenshotPath.startsWith("/") ? screenshotPath : `/${screenshotPath.replaceAll("\\", "/")}`;
-  preview.src = `${normalized}?t=${Date.now()}`;
+
+  const latest = screenshots.at(-1) || normalizePath(latestScreenshotPath);
+  preview.src = `${latest}?t=${Date.now()}`;
   preview.style.display = "block";
   previewEmpty.style.display = "none";
+  startPreviewPlayback();
 }
 
 function renderErrors(errors) {
@@ -110,11 +139,23 @@ function renderAnswer(answer) {
     answerBox.innerHTML = "<p>The agent's answer will appear here.</p>";
     return;
   }
+  const points = (answer.supporting_points || []).slice(0, 6);
+  const citations = (answer.citations || []).slice(0, 8);
   answerBox.innerHTML = `
     <p><strong>${escapeHtml(answer.direct_answer)}</strong></p>
-    ${answer.supporting_points.map((point) => `<p>${escapeHtml(point)}</p>`).join("")}
+    ${
+      points.length
+        ? `<ul>${points.map((point) => `<li>${escapeHtml(point)}</li>`).join("")}</ul>`
+        : "<p>No supporting points extracted.</p>"
+    }
     <p><strong>Confidence:</strong> ${Math.round((answer.confidence.overall || 0) * 100)}%</p>
-    ${answer.citations.length ? `<p>${answer.citations.map((citation) => `<a class="source-link" href="${citation}" target="_blank">${escapeHtml(citation)}</a>`).join("<br/>")}</p>` : ""}
+    ${
+      citations.length
+        ? `<p>${citations
+            .map((citation) => `<a class="source-link" href="${citation}" target="_blank">${escapeHtml(citation)}</a>`)
+            .join("<br/>")}</p>`
+        : ""
+    }
   `;
 }
 
@@ -173,6 +214,10 @@ function clearPanels() {
   errorBox.innerHTML = "";
   preview.style.display = "none";
   previewEmpty.style.display = "block";
+  previewStrip.innerHTML = "";
+  previewFrames = [];
+  previewFrameIndex = 0;
+  stopPreviewPlayback();
 }
 
 function escapeHtml(value) {
@@ -182,4 +227,68 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function appendUserMessage(text) {
+  const markup = `<article class="message user-message"><p>${escapeHtml(text)}</p></article>`;
+  chatThread.insertAdjacentHTML("beforeend", markup);
+  chatThread.scrollTop = chatThread.scrollHeight;
+}
+
+function appendAssistantMessage(text) {
+  const lastMessage = chatThread.lastElementChild;
+  const isDuplicate = lastMessage?.textContent?.trim() === text;
+  if (isDuplicate) return;
+  const markup = `<article class="message assistant-message"><p>${escapeHtml(text)}</p></article>`;
+  chatThread.insertAdjacentHTML("beforeend", markup);
+  chatThread.scrollTop = chatThread.scrollHeight;
+}
+
+function renderPreviewStrip() {
+  previewStrip.innerHTML = previewFrames
+    .map((path, index) => {
+      const activeClass = index === previewFrameIndex ? "active" : "";
+      return `<img class="preview-thumb ${activeClass}" src="${path}" data-index="${index}" alt="Browser frame ${index + 1}" />`;
+    })
+    .join("");
+
+  previewStrip.querySelectorAll(".preview-thumb").forEach((thumb) => {
+    thumb.addEventListener("click", () => {
+      previewFrameIndex = Number(thumb.dataset.index);
+      setPreviewFrame(previewFrameIndex, true);
+    });
+  });
+}
+
+function startPreviewPlayback() {
+  if (previewFrames.length <= 1) return;
+  if (previewTimer) return;
+  previewTimer = setInterval(() => {
+    previewFrameIndex = (previewFrameIndex + 1) % previewFrames.length;
+    setPreviewFrame(previewFrameIndex, false);
+  }, 1600);
+}
+
+function stopPreviewPlayback() {
+  if (!previewTimer) return;
+  clearInterval(previewTimer);
+  previewTimer = null;
+}
+
+function setPreviewFrame(index, resetTimer) {
+  const frame = previewFrames[index];
+  if (!frame) return;
+  preview.src = `${frame}?t=${Date.now()}`;
+  previewStrip.querySelectorAll(".preview-thumb").forEach((thumb, thumbIndex) => {
+    thumb.classList.toggle("active", thumbIndex === index);
+  });
+  if (resetTimer) {
+    stopPreviewPlayback();
+    startPreviewPlayback();
+  }
+}
+
+function normalizePath(rawPath) {
+  if (!rawPath) return "";
+  return rawPath.startsWith("/") ? rawPath : `/${rawPath.replaceAll("\\", "/")}`;
 }

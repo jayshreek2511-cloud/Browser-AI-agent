@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.core.config import get_settings
@@ -24,14 +25,21 @@ class ResearchPlanner:
             ),
         )
         if llm_result:
-            return ResearchPlan.model_validate(self._normalize_plan_payload(llm_result))
+            normalized_payload = self._normalize_plan_payload(llm_result)
+            normalized_payload["search_queries"] = self._normalize_search_queries(
+                normalized_payload.get("search_queries", []),
+                query.text,
+                intent.topic,
+                intent.subtopics,
+            )
+            return ResearchPlan.model_validate(normalized_payload)
 
         search_queries = [query.text]
         search_queries.extend(intent.subtopics[:2])
         video_queries = [f"{intent.topic} explained"] if intent.requires_youtube else []
         return ResearchPlan(
             objective=f"Answer the user's research request about {intent.topic}",
-            search_queries=[item for item in search_queries if item],
+            search_queries=self._normalize_search_queries(search_queries, query.text, intent.topic, intent.subtopics),
             video_queries=video_queries,
             subquestions=intent.subtopics[:4],
             source_limit=settings.max_web_sources,
@@ -75,4 +83,59 @@ class ResearchPlanner:
             limit = int(value)
         except (TypeError, ValueError):
             return default_limit
-        return max(1, min(limit, 10))
+        return max(5, min(limit, 10))
+
+    def _normalize_search_queries(
+        self,
+        search_queries: list[str],
+        query_text: str,
+        intent_topic: str,
+        intent_subtopics: list[str],
+    ) -> list[str]:
+        seeds = [*search_queries, query_text, intent_topic, *intent_subtopics[:3]]
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for seed in seeds:
+            compact = self._compact_search_query(seed)
+            if not compact:
+                continue
+            key = compact.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(compact)
+            if len(cleaned) >= 6:
+                break
+        return cleaned if cleaned else [query_text]
+
+    def _compact_search_query(self, text: str) -> str:
+        lowered = re.sub(r"[^a-zA-Z0-9\s-]", " ", text.lower())
+        words = [word for word in lowered.split() if len(word) > 2]
+        stopwords = {
+            "explain",
+            "including",
+            "compare",
+            "least",
+            "three",
+            "identify",
+            "show",
+            "describe",
+            "about",
+            "with",
+            "then",
+            "give",
+            "provide",
+            "recommend",
+            "useful",
+            "youtube",
+            "video",
+            "work",
+            "works",
+            "their",
+        }
+        words = [word for word in words if word not in stopwords]
+        if not words:
+            return ""
+        if "rag" in words and "retrieval" not in words:
+            words = ["retrieval", "augmented", "generation", *words]
+        return " ".join(words[:10])

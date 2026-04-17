@@ -149,10 +149,26 @@ class TaskRepository:
         if not task:
             return None
 
-        actions_stmt = select(BrowserActionRecord).where(BrowserActionRecord.task_id == task_id)
-        sources_stmt = select(SourceRecord).where(SourceRecord.task_id == task_id)
-        evidence_stmt = select(EvidenceRecord).where(EvidenceRecord.task_id == task_id)
-        errors_stmt = select(ErrorEventRecord).where(ErrorEventRecord.task_id == task_id)
+        actions_stmt = (
+            select(BrowserActionRecord)
+            .where(BrowserActionRecord.task_id == task_id)
+            .order_by(BrowserActionRecord.created_at)
+        )
+        sources_stmt = (
+            select(SourceRecord)
+            .where(SourceRecord.task_id == task_id)
+            .order_by(desc(SourceRecord.rank_score))
+        )
+        evidence_stmt = (
+            select(EvidenceRecord)
+            .where(EvidenceRecord.task_id == task_id)
+            .order_by(desc(EvidenceRecord.confidence))
+        )
+        errors_stmt = (
+            select(ErrorEventRecord)
+            .where(ErrorEventRecord.task_id == task_id)
+            .order_by(ErrorEventRecord.created_at)
+        )
 
         actions = [
             BrowserAction(
