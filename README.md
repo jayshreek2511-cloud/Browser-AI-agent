@@ -17,6 +17,9 @@ Production-minded MVP for a browser-based AI research agent, built Python-first 
 
 1. Create a virtual environment and install dependencies:
 
+Important - Change directory to Browser-Agent before running any command
+
+
 ```bash
 py -3.11 -m venv .venv
 .venv\Scripts\activate

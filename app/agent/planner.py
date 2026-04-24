@@ -14,14 +14,30 @@ class ResearchPlanner:
         llm_result = await llm_client.json_completion(
             model=settings.llm_model_planner,
             system_prompt=(
-                "Create a practical web research plan. Return JSON with keys objective, "
-                "search_queries, video_queries, subquestions, source_limit, stopping_criteria."
+                "You are an expert research strategist. Your job is to create a comprehensive, "
+                "highly targeted web research plan that will gather the BEST and MOST RELEVANT "
+                "information for the user's query.\n\n"
+                "IMPORTANT GUIDELINES:\n"
+                "- Generate 4-6 diverse, highly specific search queries that approach the topic from different angles.\n"
+                "- Each search query should be a real search engine query (concise, keyword-rich, no filler words).\n"
+                "- Include queries targeting: authoritative sources, recent developments, technical details, "
+                "practical applications, and comparisons.\n"
+                "- For academic/technical topics, include queries targeting research papers, official documentation, "
+                "and expert blogs.\n"
+                "- Generate 2-3 sub-questions that break the topic into specific aspects the user needs answered.\n"
+                "- For video queries, create queries that would find educational explainer videos.\n\n"
+                "Return JSON with keys: objective (string), search_queries (array of 4-6 strings), "
+                "video_queries (array of 1-3 strings), subquestions (array of 2-4 strings), "
+                "source_limit (integer 8-12), stopping_criteria (array of strings)."
             ),
             user_prompt=(
                 f"User query: {query.text}\n"
                 f"Intent topic: {intent.topic}\n"
                 f"Mode: {intent.mode}\n"
-                f"Requires YouTube: {intent.requires_youtube}"
+                f"Subtopics identified: {', '.join(intent.subtopics) if intent.subtopics else 'none'}\n"
+                f"Requires YouTube: {intent.requires_youtube}\n\n"
+                "Create a research plan with diverse, targeted search queries that will find "
+                "the most relevant and authoritative sources."
             ),
         )
         if llm_result:
@@ -83,7 +99,7 @@ class ResearchPlanner:
             limit = int(value)
         except (TypeError, ValueError):
             return default_limit
-        return max(5, min(limit, 10))
+        return max(6, min(limit, 15))
 
     def _normalize_search_queries(
         self,
@@ -104,7 +120,7 @@ class ResearchPlanner:
                 continue
             seen.add(key)
             cleaned.append(compact)
-            if len(cleaned) >= 6:
+            if len(cleaned) >= 8:
                 break
         return cleaned if cleaned else [query_text]
 
@@ -138,4 +154,4 @@ class ResearchPlanner:
             return ""
         if "rag" in words and "retrieval" not in words:
             words = ["retrieval", "augmented", "generation", *words]
-        return " ".join(words[:10])
+        return " ".join(words[:12])

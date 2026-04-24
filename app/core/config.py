@@ -22,15 +22,15 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("LLM_API_KEY", "GEMINI_API_KEY"),
     )
     llm_model_planner: str = Field(
-        default="gemini-2.5-flash",
+        default="gemini-3.1-flash",
         validation_alias=AliasChoices("LLM_MODEL_PLANNER", "GEMINI_MODEL_PLANNER"),
     )
     llm_model_worker: str = Field(
-        default="gemini-2.5-flash",
+        default="gemini-3.1-flash",
         validation_alias=AliasChoices("LLM_MODEL_WORKER", "GEMINI_MODEL_WORKER"),
     )
     llm_model_final: str = Field(
-        default="gemini-2.5-pro",
+        default="gemini-3.1-pro",
         validation_alias=AliasChoices("LLM_MODEL_FINAL", "GEMINI_MODEL_FINAL"),
     )
     gemini_api_base: str = Field(
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     )
     browser_headless: bool = Field(default=True, alias="BROWSER_HEADLESS")
     browser_timeout_ms: int = Field(default=30000, alias="BROWSER_TIMEOUT_MS")
-    max_web_sources: int = Field(default=5, alias="MAX_WEB_SOURCES")
+    max_web_sources: int = Field(default=8, alias="MAX_WEB_SOURCES")
     max_video_results: int = Field(default=5, alias="MAX_VIDEO_RESULTS")
     screenshot_dir: Path = Field(default=Path("artifacts/screenshots"), alias="SCREENSHOT_DIR")
     allow_live_browser: bool = Field(default=True, alias="ALLOW_LIVE_BROWSER")

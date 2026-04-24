@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
 
@@ -68,6 +69,11 @@ class LLMClient:
             logger.warning("LLM text completion failed: %s", exc)
             return None
 
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1.5, min=2, max=15),
+        reraise=True,
+    )
     async def _gemini_generate(
         self,
         *,
@@ -80,6 +86,10 @@ class LLMClient:
             f"{self.settings.gemini_api_base}/models/{model}:generateContent"
             f"?key={self.settings.llm_api_key}"
         )
+
+        # Use higher token limit for the final answer model to avoid truncation
+        max_output_tokens = 16384 if "pro" in model else 8192
+
         payload = {
             "system_instruction": {
                 "parts": [
@@ -99,11 +109,16 @@ class LLMClient:
                 }
             ],
             "generationConfig": {
-                "temperature": 0.2,
+                "temperature": 0.3,
                 "responseMimeType": response_mime_type,
+                "maxOutputTokens": max_output_tokens,
             },
         }
-        async with httpx.AsyncClient(timeout=60.0) as client:
+
+        # Use longer timeout for larger models that need time to compose
+        timeout = 120.0 if "pro" in model else 60.0
+
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(url, json=payload)
             response.raise_for_status()
         data = response.json()

@@ -3,98 +3,99 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>General Browser AI Agent</title>
-    <link rel="stylesheet" href="/ui/styles.css" />
+    <title>AI Research Agent</title>
+    <meta name="description" content="Evidence-first browser AI research agent with live progress and transparent execution." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined" rel="stylesheet" />
+    <link rel="stylesheet" href="/ui/styles.css?v=4" />
   </head>
   <body>
-    <main class="app-shell">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">Stage 1 + Stage 2 MVP</p>
-          <h1>General Browser AI Agent</h1>
-          <p class="lede">Evidence-first browser research with live progress and transparent execution.</p>
+    <div class="app-shell" id="app-shell">
+      <!-- ─── Sidebar ─────────────────────────────────────────────── -->
+      <aside class="sidebar">
+        <div class="sidebar-top">
+          <div class="logo">
+            <span class="material-symbols-outlined">neurology</span>
+            <span class="logo-text">AI Agent</span>
+          </div>
+          <button class="new-chat-btn" onclick="location.reload()">
+            <span class="material-symbols-outlined">add_notes</span>
+            <span>New Chat</span>
+          </button>
         </div>
-      </header>
-
-      <section id="chat-thread" class="chat-thread">
-        <article class="message assistant-message">
-          <p>Ask a research question to begin. I will plan, browse, verify, and answer with evidence.</p>
-        </article>
-      </section>
-
-      <section class="panel-stack">
-        <div class="row two-col">
-          <article class="panel">
-            <div class="panel-header">
-              <h2>Task Status</h2>
-              <span id="status-badge" class="badge">Idle</span>
-            </div>
-            <div class="meta">
-              <p><strong>Current step:</strong> <span id="current-step">Waiting for a task.</span></p>
-              <p><strong>Task ID:</strong> <span id="task-id">None</span></p>
-            </div>
-            <div id="progress-log" class="feed"></div>
-            <div id="error-box" class="error-box" hidden></div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-header">
-              <h2>Live Browser Preview</h2>
-            </div>
-            <div class="preview-shell">
-              <img id="browser-preview" alt="Latest browser screenshot" />
-              <div id="preview-empty" class="empty">No live browser frame yet.</div>
-            </div>
-            <div id="preview-strip" class="preview-strip"></div>
-          </article>
+        <nav class="sidebar-nav">
+          <a class="nav-item active">
+            <span class="material-symbols-outlined">search</span>
+            <span>Research</span>
+          </a>
+          <a class="nav-item">
+            <span class="material-symbols-outlined">auto_stories</span>
+            <span>Library</span>
+          </a>
+          <a class="nav-item">
+            <span class="material-symbols-outlined">database</span>
+            <span>Data Sources</span>
+          </a>
+        </nav>
+        <div class="sidebar-bottom">
+          <a class="nav-item">
+            <span class="material-symbols-outlined">settings</span>
+            <span>Settings</span>
+          </a>
         </div>
+      </aside>
 
-        <div class="row two-col">
-          <article class="panel">
-            <div class="panel-header">
-              <h2>Final Answer</h2>
+      <!-- ─── Main Area ───────────────────────────────────────────── -->
+      <main class="main-area" id="main-area">
+        <!-- ─── Chat Column ─────────────────────────────────────── -->
+        <div class="chat-column">
+          <header class="chat-header">
+            <button class="icon-btn sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">
+              <span class="material-symbols-outlined">menu</span>
+            </button>
+            <div class="header-info">
+              <h1>Research Agent</h1>
             </div>
-            <div id="answer-box" class="answer-box">
-              <p>The agent's answer will appear here.</p>
-            </div>
-          </article>
+          </header>
 
-          <article class="panel">
-            <div class="panel-header">
-              <h2>YouTube Recommendation</h2>
+          <section id="chat-thread" class="chat-thread">
+            <article class="message assistant-message">
+              <p>Ask a research question to begin. I will plan, browse, verify, and answer with evidence.</p>
+            </article>
+          </section>
+
+          <form id="query-form" class="composer">
+            <label class="sr-only" for="query">Ask the agent to research a topic</label>
+            <div class="composer-inner">
+              <textarea
+                id="query"
+                placeholder="Ask anything... e.g., Compare RAG and long-context prompting, recommend a YouTube explainer."
+                rows="1"
+              ></textarea>
+              <button type="submit" title="Run Research Task">
+                <span class="material-symbols-outlined">arrow_upward</span>
+              </button>
             </div>
-            <div id="video-card" class="answer-box">
-              <p>No video recommendation yet.</p>
-            </div>
-          </article>
+          </form>
         </div>
+      </main>
+    </div>
 
-        <div class="row two-col">
-          <article class="panel">
-            <div class="panel-header">
-              <h2>Ranked Sources</h2>
-            </div>
-            <div id="sources-list" class="stack"></div>
-          </article>
+    <script src="/ui/app.js?v=4" defer></script>
+    <script>
+      /* ── UI Chrome (sidebar toggle) ────────── */
+      document.getElementById('sidebar-toggle').addEventListener('click', () => {
+        document.getElementById('app-shell').classList.toggle('sidebar-collapsed');
+      });
 
-          <article class="panel">
-            <div class="panel-header">
-              <h2>Evidence</h2>
-            </div>
-            <div id="evidence-list" class="stack"></div>
-          </article>
-        </div>
-      </section>
-
-      <form id="query-form" class="composer">
-        <label class="sr-only" for="query">Ask the agent to research a topic</label>
-        <textarea
-          id="query"
-          placeholder="Ask anything... Example: Compare retrieval augmented generation and long-context prompting, then recommend one useful YouTube explainer."
-        ></textarea>
-        <button type="submit">Run Research Task</button>
-      </form>
-    </main>
-    <script src="/ui/app.js" defer></script>
+      /* Auto-resize textarea */
+      const ta = document.getElementById('query');
+      ta.addEventListener('input', () => {
+        ta.style.height = 'auto';
+        ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
+      });
+    </script>
   </body>
 </html>

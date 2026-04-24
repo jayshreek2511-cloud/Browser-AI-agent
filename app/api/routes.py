@@ -3,17 +3,27 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.agent.orchestrator import ResearchOrchestrator, task_runner
 from app.core.database import get_session
+from app.core.stream import screencast_stream
 from app.models.schemas import TaskCreateRequest
 from app.storage.repositories import TaskRepository
 
 router = APIRouter()
 orchestrator = ResearchOrchestrator()
+
+@router.websocket("/api/tasks/{task_id}/screencast")
+async def task_screencast(websocket: WebSocket, task_id: str):
+    await screencast_stream.connect(task_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        screencast_stream.disconnect(task_id, websocket)
 
 
 @router.get("/", include_in_schema=False)

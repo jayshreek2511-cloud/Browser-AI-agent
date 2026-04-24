@@ -140,7 +140,7 @@ class FinalAnswer(BaseModel):
     direct_answer: str
     supporting_points: list[str] = Field(default_factory=list)
     citations: list[str] = Field(default_factory=list)
-    best_video: VideoItem | None = None
+    videos: list[VideoItem] = Field(default_factory=list)
     confidence: ConfidenceScore
 
 
