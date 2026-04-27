@@ -128,6 +128,16 @@ class VideoItem(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class ImageItem(BaseModel):
+    """An image extracted from a web source during research."""
+    task_id: str
+    src: str
+    alt: str
+    source_url: str
+    source_title: str = ""
+    relevance_score: float = 0.0
+
+
 class ConfidenceScore(BaseModel):
     overall: float
     evidence_count: int
@@ -141,6 +151,7 @@ class FinalAnswer(BaseModel):
     supporting_points: list[str] = Field(default_factory=list)
     citations: list[str] = Field(default_factory=list)
     videos: list[VideoItem] = Field(default_factory=list)
+    images: list[ImageItem] = Field(default_factory=list)
     confidence: ConfidenceScore
 
 

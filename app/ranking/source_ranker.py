@@ -97,15 +97,67 @@ class SourceRanker:
 
             source.authority_score = self._authority_score(source.domain)
             source.freshness_score = 0.6 if source.published_at else 0.3
-            source.completeness_score = min(len((source.snippet or "")) / 300, 1.0)
+            source.completeness_score = self._content_quality_score(source)
+
+            # Compute accessibility bonus
+            accessibility = self._accessibility_score(source.domain)
+
             source.rank_score = (
-                (0.50 * source.relevance_score)
-                + (0.22 * source.authority_score)
-                + (0.13 * source.freshness_score)
-                + (0.15 * source.completeness_score)
+                (0.40 * source.relevance_score)
+                + (0.20 * source.authority_score)
+                + (0.10 * source.freshness_score)
+                + (0.18 * source.completeness_score)
+                + (0.12 * accessibility)
             )
+
+            # Penalize pages flagged as blocked/unusable
+            page_issue = source.metadata.get("_page_issue")
+            if page_issue:
+                source.rank_score *= 0.3  # Heavily penalize blocked pages
+
             ranked.append(source)
         return sorted(ranked, key=lambda item: item.rank_score, reverse=True)
+
+    def _content_quality_score(self, source: SourceItem) -> float:
+        """Score based on snippet length and content signals."""
+        snippet = source.snippet or ""
+        score = min(len(snippet) / 300, 1.0)
+
+        # Boost for longer, more detailed snippets
+        if len(snippet) > 150:
+            score = min(score + 0.1, 1.0)
+
+        # Penalize if the page was flagged with issues
+        if source.metadata.get("_page_issue"):
+            score *= 0.2
+
+        return score
+
+    def _accessibility_score(self, domain: str) -> float:
+        """Score how likely a domain is to be publicly accessible."""
+        lowered = domain.lower()
+
+        # Highly accessible & research-dense sources
+        high_access = [
+            "wikipedia.org", "github.com", "docs.python.org",
+            "developer.mozilla.org", "stackoverflow.com",
+            "medium.com", "dev.to", "towardsdatascience.com",
+            "huggingface.co", "arxiv.org", "sciencedirect.com",
+            "nature.com", "ieee.org", "mit.edu", "stanford.edu",
+        ]
+        if any(hint in lowered for hint in high_access):
+            return 0.98
+
+        # Likely accessible (public educational / gov)
+        if any(ext in lowered for ext in [".edu", ".gov", ".org"]):
+            return 0.85
+
+        # Community forums (good for opinions, bad for factual reports)
+        forum_sites = ["reddit.com", "quora.com", "pinterest.com", "facebook.com"]
+        if any(hint in lowered for hint in forum_sites):
+            return 0.30
+
+        return 0.65  # Default
 
     def _authority_score(self, domain: str) -> float:
         lowered = domain.lower()

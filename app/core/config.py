@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     screenshot_dir: Path = Field(default=Path("artifacts/screenshots"), alias="SCREENSHOT_DIR")
     allow_live_browser: bool = Field(default=True, alias="ALLOW_LIVE_BROWSER")
 
+    # Optional: Official Search API keys (set in .env for better search reliability)
+    bing_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("BING_API_KEY", "BING_SEARCH_KEY"),
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:

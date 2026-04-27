@@ -1,17 +1,49 @@
+/* ===================================================================
+   AI Research Agent — app.js (v6)
+   Multi-task, Library, Image cards, Single-stream with blue glow
+   =================================================================== */
+
 const form = document.getElementById("query-form");
 const queryInput = document.getElementById("query");
 const chatThread = document.getElementById("chat-thread");
 
-let activeTaskId = null;
-let pollHandle = null;
-let previewFrames = [];
-let previewFrameIndex = 0;
-let previewTimer = null;
+// ── Multi-task state ──────────────────────────────────────────────────
+let currentChatTaskIds = [];   // task IDs in the current chat thread
 let activeWebSockets = new Map(); // taskId -> WebSocket
-let liveTasks = new Set(); // taskId set
-let manualTabSelections = new Map(); // taskId -> pageId or null for 'auto'
-let seenPages = new Map(); // taskId -> Set of pageIds
+let liveTasks = new Set();        // taskId set — currently streaming
+let pollHandles = new Map();      // taskId -> intervalId
+let allChats = [];                // Array of { id, label, taskIds, html }
+let currentChatId = null;
 
+// ── Startup ───────────────────────────────────────────────────────────
+initNewChat(true); // first launch — creates a blank chat
+loadLibraryFromServer();
+
+// ── View switching (sidebar nav) ──────────────────────────────────────
+document.querySelectorAll(".nav-item[data-view]").forEach(item => {
+  item.addEventListener("click", () => {
+    const view = item.dataset.view;
+    document.querySelectorAll(".nav-item[data-view]").forEach(n => n.classList.remove("active"));
+    item.classList.add("active");
+    document.getElementById("view-research").style.display = (view === "research") ? "flex" : "none";
+    document.getElementById("view-library").style.display  = (view === "library")  ? "flex" : "none";
+    if (view === "library") renderLibrary();
+  });
+});
+
+// ── New Chat button ───────────────────────────────────────────────────
+document.getElementById("new-chat-btn").addEventListener("click", () => {
+  // Save current chat before starting new one
+  saveCurrentChat();
+  initNewChat(false);
+  // Switch to research view
+  document.querySelectorAll(".nav-item[data-view]").forEach(n => n.classList.remove("active"));
+  document.getElementById("nav-research").classList.add("active");
+  document.getElementById("view-research").style.display = "flex";
+  document.getElementById("view-library").style.display  = "none";
+});
+
+// ── Form submit ───────────────────────────────────────────────────────
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const query = queryInput.value.trim();
@@ -25,143 +57,91 @@ form.addEventListener("submit", async (event) => {
     body: JSON.stringify({ query }),
   });
   const payload = await response.json();
-  activeTaskId = payload.task_id;
+  const taskId = payload.task_id;
+  currentChatTaskIds.push(taskId);
 
-  const taskHtml = `
-    <article class="message assistant-message" id="task-msg-${activeTaskId}">
-      <div class="status-container" style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
-        <span class="badge" id="status-badge-${activeTaskId}">queued</span>
-        <span id="current-step-${activeTaskId}" style="font-size: 0.9em; color: var(--on-surface-variant);">Task created</span>
-        <span id="task-id-${activeTaskId}" style="font-size: 0.8em; color: var(--muted);">ID: ${activeTaskId}</span>
-      </div>
-      
-      <div id="progress-log-${activeTaskId}" class="feed" style="margin-bottom: 12px; font-size: 0.85em;"></div>
-      <div id="error-box-${activeTaskId}" class="error-box" hidden></div>
-      
-      <div id="browser-container-${activeTaskId}" style="display:none; margin-bottom: 16px;">
-        <div id="live-tab-strip-${activeTaskId}" class="live-tab-strip" style="display:none;"></div>
-        <div id="preview-grid-${activeTaskId}" class="preview-grid">
-          <div id="preview-empty-${activeTaskId}" class="empty">No live browser frame yet.</div>
-        </div>
-        <div id="preview-strip-${activeTaskId}" class="preview-strip"></div>
-      </div>
-
-      <div id="sources-list-${activeTaskId}" class="stack" style="margin-bottom: 20px;"></div>
-      <div id="answer-box-${activeTaskId}" class="answer-box" style="margin-bottom: 20px;"></div>
-      <div id="video-card-${activeTaskId}" class="answer-box" style="margin-bottom: 20px;"></div>
-      <div id="evidence-list-${activeTaskId}" class="stack" style="margin-bottom: 20px;"></div>
-    </article>
-  `;
+  const taskHtml = buildTaskArticle(taskId);
   chatThread.insertAdjacentHTML("beforeend", taskHtml);
 
-  // Clear input and reset height
   queryInput.value = "";
-  queryInput.style.height = 'auto';
+  queryInput.style.height = "auto";
 
-  clearPanels(activeTaskId);
-  startPolling();
-  startScreencast(activeTaskId);
+  startPolling(taskId);
+  startScreencast(taskId);
+  chatThread.scrollTop = chatThread.scrollHeight;
 });
 
+// ── Build task article HTML ───────────────────────────────────────────
+function buildTaskArticle(taskId) {
+  return `
+    <article class="message assistant-message" id="task-msg-${taskId}">
+      <div class="status-container" style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+        <span class="badge" id="status-badge-${taskId}">queued</span>
+        <span id="current-step-${taskId}" style="font-size: 0.9em; color: var(--on-surface-variant);">Task created</span>
+      </div>
+
+      <div id="progress-log-${taskId}" class="feed" style="margin-bottom: 12px; font-size: 0.85em;"></div>
+      <div id="error-box-${taskId}" class="error-box" hidden></div>
+
+      <div id="browser-container-${taskId}" style="display:block; margin-bottom: 16px;">
+        <div class="stream-header">
+          <span class="material-symbols-outlined" style="font-size:18px;">cast</span>
+          <span>Live Agent Browsing Stream:</span>
+        </div>
+        <div id="preview-grid-${taskId}" class="preview-grid">
+          <div id="preview-empty-${taskId}" class="empty">
+            <div class="loading-spinner"></div>
+            <p>Initializing live browser stream...</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="sources-list-${taskId}" class="stack" style="margin-bottom: 20px;"></div>
+      <div id="answer-box-${taskId}" class="answer-box" style="margin-bottom: 20px;"></div>
+      <div id="image-card-${taskId}" class="answer-box" style="margin-bottom: 20px;"></div>
+      <div id="video-card-${taskId}" class="answer-box" style="margin-bottom: 20px;"></div>
+      <div id="evidence-list-${taskId}" class="stack" style="margin-bottom: 20px;"></div>
+    </article>
+  `;
+}
+
+// ── Screencast (WebSocket) ────────────────────────────────────────────
 function startScreencast(taskId) {
-  console.log("Starting screencast for task:", taskId);
-  
-  // Close existing socket for this task if any
   if (activeWebSockets.has(taskId)) {
     const oldWs = activeWebSockets.get(taskId);
     oldWs.onclose = null;
     oldWs.close();
   }
-  
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${protocol}//${window.location.host}/api/tasks/${taskId}/screencast`;
-  console.log("Connecting to WebSocket:", wsUrl);
   const ws = new WebSocket(wsUrl);
   activeWebSockets.set(taskId, ws);
 
-  ws.onopen = () => {
-    console.log("WebSocket connected for task:", taskId);
-  };
+  ws.onopen = () => console.log("WS connected:", taskId);
 
   ws.onmessage = (event) => {
     try {
       const { page_id, data } = JSON.parse(event.data);
       if (!liveTasks.has(taskId)) {
-        console.log("First live frame received for task:", taskId);
         liveTasks.add(taskId);
       }
-      
       const grid = document.getElementById(`preview-grid-${taskId}`);
-      const tabStrip = document.getElementById(`live-tab-strip-${taskId}`);
       if (!grid) return;
 
-      // Track seen pages and update tabs
-      if (!seenPages.has(taskId)) seenPages.set(taskId, new Set());
-      const pages = seenPages.get(taskId);
-      
-      if (!pages.has(page_id)) {
-        pages.add(page_id);
-        if (tabStrip) {
-          tabStrip.style.display = "flex";
-          // If this is the first page (not counting Auto), add Auto tab
-          if (pages.size === 1) {
-             const autoBtn = document.createElement("button");
-             autoBtn.id = `tab-auto-${taskId}`;
-             autoBtn.className = "live-tab active";
-             autoBtn.textContent = "Auto Switch";
-             autoBtn.onclick = () => {
-               manualTabSelections.set(taskId, null);
-               updateLiveTabs(taskId);
-             };
-             tabStrip.appendChild(autoBtn);
-          }
-          
-          const tab = document.createElement("button");
-          tab.id = `tab-${page_id}`;
-          tab.className = "live-tab";
-          tab.textContent = `Tab ${pages.size}`;
-          tab.onclick = () => {
-            manualTabSelections.set(taskId, page_id);
-            updateLiveTabs(taskId);
-          };
-          tabStrip.appendChild(tab);
-        }
-      }
-
-      // Switching logic: Use manual selection if set, otherwise follow latest
-      const manualId = manualTabSelections.get(taskId);
-      const activeId = manualId || page_id;
-
-      let img = document.getElementById(`stream-${page_id}`);
+      // Single-stream display: update the one visible frame
+      let img = grid.querySelector(".stream-frame");
       if (!img) {
-        // Remove fallback if exists
-        const fallback = grid.querySelector(".screenshot-fallback");
-        if (fallback) fallback.remove();
-
-        img = document.createElement("img");
-        img.id = `stream-${page_id}`;
-        img.className = "stream-frame";
-        img.alt = "Live Stream";
-        grid.appendChild(img);
-        
         const empty = document.getElementById(`preview-empty-${taskId}`);
         if (empty) empty.style.display = "none";
+        img = document.createElement("img");
+        img.className = "stream-frame";
+        img.alt = "Live Browser Stream";
+        grid.appendChild(img);
       }
-      
       img.src = data;
-      img.classList.remove("screenshot-fallback");
-      
-      // Update visibility based on active selection
-      grid.querySelectorAll(".stream-frame").forEach(el => {
-        if (el.id === `stream-${activeId}`) {
-          el.style.display = "block";
-        } else {
-          el.style.display = "none";
-        }
-      });
-      
+      img.style.display = "block";
       // Ensure grid and container are visible
-      grid.style.display = "grid";
+      grid.style.display = "flex";
       const container = document.getElementById(`browser-container-${taskId}`);
       if (container) container.style.display = "block";
     } catch (e) {
@@ -170,39 +150,43 @@ function startScreencast(taskId) {
   };
 
   ws.onclose = () => {
-    console.log("WebSocket closed for task:", taskId);
     activeWebSockets.delete(taskId);
-    // We don't remove from liveTasks immediately to keep the last frame shown as "live" 
-    // until the next polling cycle or task completion.
   };
 }
 
-function startPolling() {
-  if (pollHandle) clearInterval(pollHandle);
-  fetchTask();
-  pollHandle = setInterval(fetchTask, 2500);
+// ── Polling ───────────────────────────────────────────────────────────
+function startPolling(taskId) {
+  if (pollHandles.has(taskId)) clearInterval(pollHandles.get(taskId));
+  fetchTask(taskId);
+  const handle = setInterval(() => fetchTask(taskId), 2500);
+  pollHandles.set(taskId, handle);
 }
 
-async function fetchTask() {
-  if (!activeTaskId) return;
-  const response = await fetch(`/api/tasks/${activeTaskId}`);
-  if (!response.ok) return;
-  const task = await response.json();
-  renderTask(task.id, task);
-  if (task.status === "completed" || task.status === "failed") {
-    clearInterval(pollHandle);
-    liveTasks.delete(task.id);
-    // Refresh one last time to show historical strip
+async function fetchTask(taskId) {
+  try {
+    const response = await fetch(`/api/tasks/${taskId}`);
+    if (!response.ok) return;
+    const task = await response.json();
     renderTask(task.id, task);
+    if (task.status === "completed" || task.status === "failed") {
+      clearInterval(pollHandles.get(taskId));
+      pollHandles.delete(taskId);
+      liveTasks.delete(task.id);
+      renderTask(task.id, task); // one last render
+      saveCurrentChat(); // auto-save on completion
+    }
+  } catch (e) {
+    // Network error — retry on next interval
   }
 }
 
+// ── Render Task ───────────────────────────────────────────────────────
 function renderTask(taskId, task) {
   const statusBadge = document.getElementById(`status-badge-${taskId}`);
   const currentStep = document.getElementById(`current-step-${taskId}`);
   if (statusBadge) statusBadge.textContent = task.status;
   if (currentStep) currentStep.textContent = task.current_step;
-  
+
   renderActions(taskId, task.actions || []);
   renderErrors(taskId, task.errors || []);
   renderPreview(taskId, task.actions || [], task.latest_screenshot);
@@ -210,6 +194,7 @@ function renderTask(taskId, task) {
   renderSources(taskId, task.sources || []);
   renderEvidence(taskId, task.evidence || []);
   renderVideo(taskId, task.answer?.videos || []);
+  renderImages(taskId, task.answer?.images || []);
 }
 
 function renderActions(taskId, actions) {
@@ -238,16 +223,11 @@ function renderPreview(taskId, actions, latestScreenshotPath) {
     )
   );
 
-  previewFrames = screenshots;
-  renderPreviewStrip(taskId);
-
   const grid = document.getElementById(`preview-grid-${taskId}`);
   const container = document.getElementById(`browser-container-${taskId}`);
   const previewEmpty = document.getElementById(`preview-empty-${taskId}`);
-  const previewStrip = document.getElementById(`preview-strip-${taskId}`);
 
   if (!screenshots.length && !latestScreenshotPath) {
-    stopPreviewPlayback();
     if (grid) grid.style.display = "none";
     if (previewEmpty) previewEmpty.style.display = "block";
     if (container) container.style.display = "block";
@@ -258,14 +238,12 @@ function renderPreview(taskId, actions, latestScreenshotPath) {
   const hasLiveFrames = grid && grid.querySelector(".stream-frame");
 
   if (isLive && hasLiveFrames) {
-    if (previewStrip) previewStrip.style.display = "none";
     if (grid) grid.style.display = "grid";
     if (container) container.style.display = "block";
     return;
   }
 
-  if (previewStrip) previewStrip.style.display = "flex";
-
+  // Historical fallback: show the latest screenshot
   if (grid) {
     grid.style.display = "grid";
     const latest = screenshots.at(-1) || normalizePath(latestScreenshotPath);
@@ -285,7 +263,6 @@ function renderPreview(taskId, actions, latestScreenshotPath) {
     }
   }
   if (container) container.style.display = "block";
-  startPreviewPlayback(taskId);
 }
 
 function renderErrors(taskId, errors) {
@@ -409,42 +386,179 @@ function renderVideo(taskId, videos) {
   }).join("");
 }
 
-function clearPanels(taskId) {
-  const answerBox = document.getElementById(`answer-box-${taskId}`);
-  const sourcesList = document.getElementById(`sources-list-${taskId}`);
-  const evidenceList = document.getElementById(`evidence-list-${taskId}`);
-  const videoCard = document.getElementById(`video-card-${taskId}`);
-  const errorBox = document.getElementById(`error-box-${taskId}`);
-  const grid = document.getElementById(`preview-grid-${taskId}`);
-  const previewStrip = document.getElementById(`preview-strip-${taskId}`);
-  const tabStrip = document.getElementById(`live-tab-strip-${taskId}`);
-
-  if (answerBox) answerBox.innerHTML = "";
-  if (sourcesList) sourcesList.innerHTML = "";
-  if (evidenceList) evidenceList.innerHTML = "";
-  if (videoCard) videoCard.innerHTML = "";
-  if (errorBox) {
-    errorBox.hidden = true;
-    errorBox.innerHTML = "";
+// ── Image Cards ───────────────────────────────────────────────────────
+function renderImages(taskId, images) {
+  const imageCard = document.getElementById(`image-card-${taskId}`);
+  if (!imageCard) return;
+  if (!images || !images.length) {
+    imageCard.innerHTML = "";
+    return;
   }
-
-  if (grid) {
-    grid.innerHTML = `<div id="preview-empty-${taskId}" class="empty">No live browser frame yet.</div>`;
-  }
-
-  if (previewStrip) previewStrip.innerHTML = "";
-  if (tabStrip) {
-    tabStrip.innerHTML = "";
-    tabStrip.style.display = "none";
-  }
-
-  previewFrames = [];
-  previewFrameIndex = 0;
-  manualTabSelections.delete(taskId);
-  seenPages.delete(taskId);
-  stopPreviewPlayback();
+  imageCard.innerHTML = `
+    <h3 style="margin-bottom: 12px; font-size: 1.1em; color: var(--primary);">Related Images</h3>
+    <div class="image-grid">
+      ${images.map(img => `
+        <div class="image-card">
+          <div class="image-card-thumb">
+            <img src="${escapeHtml(img.src)}" alt="${escapeHtml(img.alt)}" loading="lazy"
+                 onerror="this.parentElement.parentElement.style.display='none'" />
+          </div>
+          <div class="image-card-info">
+            <p class="image-card-alt">${escapeHtml(img.alt)}</p>
+            <a class="source-link" href="${escapeHtml(img.source_url)}" target="_blank" style="font-size: 0.75em;">
+              ${escapeHtml(img.source_title || img.source_url)}
+            </a>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
+// ── Chat Management ───────────────────────────────────────────────────
+function initNewChat(isFirst) {
+  const id = "chat-" + Date.now();
+  currentChatId = id;
+  currentChatTaskIds = [];
+  if (!isFirst) {
+    // Clear thread
+    chatThread.innerHTML = `
+      <article class="message assistant-message">
+        <p>Ask a research question to begin. I will plan, browse, verify, and answer with evidence.</p>
+      </article>
+    `;
+  }
+  queryInput.value = "";
+  queryInput.style.height = "auto";
+}
+
+function saveCurrentChat() {
+  if (!currentChatId) return;
+  // Extract the first user message as label
+  const firstUser = chatThread.querySelector(".user-message p");
+  const label = firstUser ? firstUser.textContent.slice(0, 60) : "Untitled Research";
+  // Check if this chat is already saved
+  const existing = allChats.find(c => c.id === currentChatId);
+  if (existing) {
+    existing.html = chatThread.innerHTML;
+    existing.label = label;
+    existing.taskIds = [...currentChatTaskIds];
+  } else if (currentChatTaskIds.length > 0) {
+    allChats.unshift({ id: currentChatId, label, taskIds: [...currentChatTaskIds], html: chatThread.innerHTML });
+  }
+}
+
+function loadChat(chatId) {
+  const chat = allChats.find(c => c.id === chatId);
+  if (!chat) return;
+  // Save the current one first
+  saveCurrentChat();
+  // Restore
+  currentChatId = chat.id;
+  currentChatTaskIds = [...chat.taskIds];
+  chatThread.innerHTML = chat.html;
+  // Re-attach polling for any non-completed tasks
+  for (const taskId of currentChatTaskIds) {
+    if (!pollHandles.has(taskId)) {
+      // Check if task is still running
+      fetchTask(taskId).then(() => {
+        // If still running, it'll auto-resume polling via fetchTask
+      });
+    }
+  }
+  // Switch to research view
+  document.querySelectorAll(".nav-item[data-view]").forEach(n => n.classList.remove("active"));
+  document.getElementById("nav-research").classList.add("active");
+  document.getElementById("view-research").style.display = "flex";
+  document.getElementById("view-library").style.display  = "none";
+}
+
+// ── Library View ──────────────────────────────────────────────────────
+async function loadLibraryFromServer() {
+  try {
+    const resp = await fetch("/api/tasks");
+    if (!resp.ok) return;
+    const tasks = await resp.json();
+    // Build library entries from server-side task records
+    for (const t of tasks) {
+      const existsInChats = allChats.some(c => c.taskIds.includes(t.id));
+      if (!existsInChats) {
+        allChats.push({
+          id: "server-" + t.id,
+          label: t.query.slice(0, 60),
+          taskIds: [t.id],
+          html: null, // will be rebuilt on click
+          serverTask: t,
+        });
+      }
+    }
+  } catch (e) {
+    // Startup error — not critical
+  }
+}
+
+function renderLibrary() {
+  const listEl = document.getElementById("library-list");
+  if (!listEl) return;
+  // Merge in-memory chats + server tasks
+  const entries = [...allChats];
+  if (!entries.length) {
+    listEl.innerHTML = `
+      <div class="library-empty">
+        <span class="material-symbols-outlined" style="font-size:48px;color:var(--muted);">auto_stories</span>
+        <p>No past research sessions yet.</p>
+      </div>
+    `;
+    return;
+  }
+  listEl.innerHTML = entries.map(chat => {
+    const statusIcon = chat.serverTask
+      ? (chat.serverTask.status === "completed" ? "check_circle" : chat.serverTask.status === "failed" ? "error" : "pending")
+      : "history";
+    const statusColor = chat.serverTask
+      ? (chat.serverTask.status === "completed" ? "var(--secondary)" : chat.serverTask.status === "failed" ? "var(--error)" : "var(--primary)")
+      : "var(--muted)";
+    return `
+      <div class="library-card" onclick="loadChatOrTask('${chat.id}')">
+        <div class="library-card-icon">
+          <span class="material-symbols-outlined" style="color:${statusColor}">${statusIcon}</span>
+        </div>
+        <div class="library-card-info">
+          <p class="library-card-title">${escapeHtml(chat.label)}</p>
+          <p class="library-card-meta">${chat.taskIds.length} task(s)</p>
+        </div>
+        <span class="material-symbols-outlined" style="color:var(--muted);font-size:18px;">chevron_right</span>
+      </div>
+    `;
+  }).join("");
+}
+
+// Make loadChatOrTask global for onclick
+window.loadChatOrTask = function(chatId) {
+  const chat = allChats.find(c => c.id === chatId);
+  if (!chat) return;
+  if (chat.html) {
+    loadChat(chatId);
+  } else if (chat.serverTask) {
+    // Rebuild the chat from server data
+    saveCurrentChat();
+    currentChatId = chat.id;
+    currentChatTaskIds = [...chat.taskIds];
+    chatThread.innerHTML = `
+      <article class="message user-message"><p>${escapeHtml(chat.serverTask.query)}</p></article>
+      ${buildTaskArticle(chat.serverTask.id)}
+    `;
+    // Fetch and render the task data
+    startPolling(chat.serverTask.id);
+    // Switch to research view
+    document.querySelectorAll(".nav-item[data-view]").forEach(n => n.classList.remove("active"));
+    document.getElementById("nav-research").classList.add("active");
+    document.getElementById("view-research").style.display = "flex";
+    document.getElementById("view-library").style.display  = "none";
+  }
+};
+
+// ── Utilities ─────────────────────────────────────────────────────────
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -460,102 +574,7 @@ function appendUserMessage(text) {
   chatThread.scrollTop = chatThread.scrollHeight;
 }
 
-function appendAssistantMessage(text) {
-  const lastMessage = chatThread.lastElementChild;
-  const isDuplicate = lastMessage?.textContent?.trim() === text;
-  if (isDuplicate) return;
-  const markup = `<article class="message assistant-message"><p>${escapeHtml(text)}</p></article>`;
-  chatThread.insertAdjacentHTML("beforeend", markup);
-  chatThread.scrollTop = chatThread.scrollHeight;
-}
-
-function renderPreviewStrip(taskId) {
-  const previewStrip = document.getElementById(`preview-strip-${taskId}`);
-  if (!previewStrip) return;
-  previewStrip.innerHTML = previewFrames
-    .map((path, index) => {
-      const activeClass = index === previewFrameIndex ? "active" : "";
-      return `<img class="preview-thumb ${activeClass}" src="${path}" data-index="${index}" alt="Browser frame ${index + 1}" />`;
-    })
-    .join("");
-
-  previewStrip.querySelectorAll(".preview-thumb").forEach((thumb) => {
-    thumb.addEventListener("click", () => {
-      previewFrameIndex = Number(thumb.dataset.index);
-      setPreviewFrame(taskId, previewFrameIndex, true);
-    });
-  });
-}
-
-function startPreviewPlayback(taskId) {
-  if (previewFrames.length <= 1) return;
-  if (previewTimer) return;
-  previewTimer = setInterval(() => {
-    previewFrameIndex = (previewFrameIndex + 1) % previewFrames.length;
-    setPreviewFrame(taskId, previewFrameIndex, false);
-  }, 1600);
-}
-
-function stopPreviewPlayback() {
-  if (!previewTimer) return;
-  clearInterval(previewTimer);
-  previewTimer = null;
-}
-
-function setPreviewFrame(taskId, index, resetTimer) {
-  const frame = previewFrames[index];
-  if (!frame) return;
-
-  const grid = document.getElementById(`preview-grid-${taskId}`);
-  const previewStrip = document.getElementById(`preview-strip-${taskId}`);
-
-  if (grid) {
-    let img = grid.querySelector(".stream-frame");
-    if (!img) {
-      img = document.createElement("img");
-      img.className = "stream-frame";
-      grid.appendChild(img);
-    }
-    img.src = `${frame}?t=${Date.now()}`;
-  }
-
-  if (previewStrip) {
-    previewStrip.querySelectorAll(".preview-thumb").forEach((thumb, thumbIndex) => {
-      thumb.classList.toggle("active", thumbIndex === index);
-    });
-  }
-  if (resetTimer) {
-    stopPreviewPlayback();
-    startPreviewPlayback(taskId);
-  }
-}
-
 function normalizePath(rawPath) {
   if (!rawPath) return "";
   return rawPath.startsWith("/") ? rawPath : `/${rawPath.replaceAll("\\", "/")}`;
-}
-
-function updateLiveTabs(taskId) {
-  const tabStrip = document.getElementById(`live-tab-strip-${taskId}`);
-  if (!tabStrip) return;
-  const manualId = manualTabSelections.get(taskId);
-  
-  tabStrip.querySelectorAll(".live-tab").forEach(tab => {
-    if (tab.id === `tab-auto-${taskId}`) {
-      tab.classList.toggle("active", !manualId);
-    } else {
-      tab.classList.toggle("active", tab.id === `tab-${manualId}`);
-    }
-  });
-
-  // Force re-render of frame visibility
-  const grid = document.getElementById(`preview-grid-${taskId}`);
-  if (grid) {
-    // Note: visibility is also handled in onmessage, 
-    // but here we force it for the frames already in DOM
-    const frames = grid.querySelectorAll(".stream-frame");
-    if (manualId) {
-        frames.forEach(f => f.style.display = (f.id === `stream-${manualId}`) ? "block" : "none");
-    }
-  }
 }

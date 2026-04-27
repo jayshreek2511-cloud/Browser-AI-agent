@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import logging
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,8 +14,11 @@ from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 from app.core.config import get_settings
 from app.core.stream import screencast_stream
+from app.models.schemas import BrowserAction, BrowserActionType, EvidenceItem, EvidenceType, ImageItem
 from app.safety.guardrails import safety_guard
 from app.utils.text import keyword_overlap_score
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -116,54 +120,255 @@ class BrowserWorker:
         await self._safe_shutdown()
 
     async def web_search(self, query: str, limit: int = 5) -> list[SearchResult]:
-        """Search via Playwright (stealth) + research APIs for diverse, non-Wikipedia sources."""
+        """Multi-engine search: official API first, httpx scraping second, Playwright last."""
         results: list[SearchResult] = []
         seen: set[str] = set()
 
-        # --- Primary: Try DuckDuckGo with stealth Playwright ---
-        try:
-            ddg_results = await self._playwright_ddg_search(query, limit * 2)
-            for r in ddg_results:
+        def _add(items: list[SearchResult]) -> None:
+            for r in items:
                 if r.url not in seen:
                     seen.add(r.url)
                     results.append(r)
+
+        # --- Layer 0: Bing Web Search API (best quality, needs API key) ---
+        try:
+            _add(await self._bing_api_search(query, limit * 2))
         except Exception:
             pass
 
-        # --- Secondary: Try Bing with stealth Playwright ---
+        # --- Layer 1: Startpage (privacy proxy to Google, no CAPTCHA) ---
         if len(results) < limit:
             try:
-                bing_results = await self._playwright_bing_search(query, limit * 2)
-                for r in bing_results:
-                    if r.url not in seen:
-                        seen.add(r.url)
-                        results.append(r)
+                _add(await self._startpage_search(query, limit * 2))
             except Exception:
                 pass
 
-        # --- Always: Supplement with research-grade APIs (arXiv, Semantic Scholar) ---
-        try:
-            research_results = await self._research_source_search(query, limit)
-            for r in research_results:
-                if r.url not in seen:
-                    seen.add(r.url)
-                    results.append(r)
-        except Exception:
-            pass
+        # --- Layer 2: Mojeek (independent search engine, no CAPTCHA) ---
+        if len(results) < limit:
+            try:
+                _add(await self._mojeek_search(query, limit * 2))
+            except Exception:
+                pass
 
-        # --- Last resort: DuckDuckGo Instant Answers API ---
-        if not results:
-            fallback = await self._api_search_fallback(query, limit * 2)
-            for r in fallback:
-                if r.url not in seen:
-                    seen.add(r.url)
-                    results.append(r)
+        # --- Layer 3: Research APIs (Wikipedia, arXiv, Semantic Scholar) ---
+        if len(results) < limit:
+            try:
+                _add(await self._research_source_search(query, limit))
+            except Exception:
+                pass
+
+        # --- Layer 4: Playwright DuckDuckGo (only if API methods failed) ---
+        if len(results) < limit:
+            try:
+                _add(await self._playwright_ddg_search(query, limit * 2))
+            except Exception:
+                pass
+
+        # --- Layer 5: Playwright Bing (last resort) ---
+        if len(results) < limit:
+            try:
+                _add(await self._playwright_bing_search(query, limit * 2))
+            except Exception:
+                pass
+
+        # --- Layer 6: DuckDuckGo Instant Answers API ---
+        if len(results) < 3:
+            try:
+                _add(await self._api_search_fallback(query, limit * 2))
+            except Exception:
+                pass
 
         relevant = _filter_results_by_query(query, results)
         return relevant[:limit]
 
+    async def _bing_api_search(self, query: str, limit: int) -> list[SearchResult]:
+        """Bing Web Search API v7 — official, structured JSON, never blocked.
+        
+        Requires BING_API_KEY in .env. If not configured, returns empty (skipped).
+        Free tier: 1,000 calls/month.
+        Get a key at: https://www.microsoft.com/en-us/bing/apis/bing-web-search-api
+        """
+        from app.core.config import get_settings
+        settings = get_settings()
+        if not settings.bing_api_key:
+            return []  # No API key configured — silently skip to next layer
+
+        results: list[SearchResult] = []
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://api.bing.microsoft.com/v7.0/search",
+                params={
+                    "q": query,
+                    "count": str(min(limit, 50)),
+                    "mkt": "en-US",
+                    "responseFilter": "Webpages",
+                    "textFormat": "Raw",
+                },
+                headers={
+                    "Ocp-Apim-Subscription-Key": settings.bing_api_key,
+                },
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            for item in data.get("webPages", {}).get("value", []):
+                title = item.get("name", "")
+                url = item.get("url", "")
+                snippet = item.get("snippet", "")
+                if title and url:
+                    results.append(SearchResult(title=title, url=url, snippet=snippet))
+                if len(results) >= limit:
+                    break
+        return results
+
+    async def image_search(self, query: str, limit: int = 10) -> list[ImageItem]:
+        """Performs a dedicated image search."""
+        from app.core.config import get_settings
+        settings = get_settings()
+        
+        if not self.context:
+            return []
+            
+        if settings.bing_api_key:
+            return await self._bing_api_image_search(query, limit)
+        else:
+            return await self._duckduckgo_image_search(query, limit)
+
+    async def _bing_api_image_search(self, query: str, limit: int) -> list[ImageItem]:
+        """Bing Image Search API v7."""
+        from app.core.config import get_settings
+        settings = get_settings()
+        results: list[ImageItem] = []
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://api.bing.microsoft.com/v7.0/images/search",
+                params={"q": query, "count": str(min(limit, 50)), "mkt": "en-US"},
+                headers={"Ocp-Apim-Subscription-Key": settings.bing_api_key},
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            for item in data.get("value", []):
+                results.append(ImageItem(
+                    task_id=self.task_id,
+                    src=item.get("contentUrl", ""),
+                    alt=item.get("name", ""),
+                    source_url=item.get("hostPageUrl", ""),
+                    source_title=item.get("hostPageDisplayUrl", ""),
+                    relevance_score=1.0 # API results are generally relevant
+                ))
+                if len(results) >= limit:
+                    break
+        return results
+
+    async def _duckduckgo_image_search(self, query: str, limit: int) -> list[ImageItem]:
+        """Scrapes DuckDuckGo Images using Playwright."""
+        results: list[ImageItem] = []
+        page = None
+        try:
+            page = await self.context.new_page()
+            url = f"https://duckduckgo.com/?q={query.replace(' ', '+')}&iax=images&ia=images"
+            await page.goto(url, wait_until="networkidle")
+            await page.wait_for_selector(".tile--img", timeout=10000)
+            
+            tiles = await page.query_selector_all(".tile--img")
+            for tile in tiles[:limit]:
+                img = await tile.query_selector("img.tile--img__img")
+                if img:
+                    src = await img.get_attribute("src")
+                    alt = await img.get_attribute("alt") or ""
+                    # DDG uses proxy URLs for images often, but we can try to get the original if needed.
+                    # For now, let's take what we have.
+                    if src:
+                        if src.startswith("//"): src = "https:" + src
+                        results.append(ImageItem(
+                            task_id=self.task_id,
+                            src=src,
+                            alt=alt,
+                            source_url=url,
+                            source_title="DuckDuckGo Images",
+                            relevance_score=0.9
+                        ))
+        except Exception as e:
+            logger.error(f"DuckDuckGo image search failed: {e}")
+        finally:
+            if page:
+                await page.close()
+        return results
+
+    async def _startpage_search(self, query: str, limit: int) -> list[SearchResult]:
+        """Startpage search via httpx POST — privacy proxy to Google, no CAPTCHA."""
+        results: list[SearchResult] = []
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=headers) as client:
+            resp = await client.post(
+                "https://www.startpage.com/sp/search",
+                data={"query": query, "cat": "web", "language": "english"},
+            )
+            if resp.status_code != 200:
+                return []
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for item in soup.select(".w-gl__result"):
+                link = item.select_one("a.w-gl__result-title")
+                snippet_el = item.select_one(".w-gl__description")
+                if not link:
+                    continue
+                href = str(link.get("href") or "")
+                if not href.startswith("http"):
+                    continue
+                title = link.get_text(" ", strip=True)
+                snippet = snippet_el.get_text(" ", strip=True) if snippet_el else ""
+                results.append(SearchResult(title=title, url=href, snippet=snippet))
+                if len(results) >= limit:
+                    break
+        return results
+
+    async def _mojeek_search(self, query: str, limit: int) -> list[SearchResult]:
+        """Mojeek independent search engine via httpx — no CAPTCHA."""
+        results: list[SearchResult] = []
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+        }
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=headers) as client:
+            resp = await client.get(
+                "https://www.mojeek.com/search",
+                params={"q": query},
+            )
+            if resp.status_code != 200:
+                return []
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for item in soup.select("ul.results-standard li"):
+                link = item.select_one("a.ob")
+                snippet_el = item.select_one("p.s")
+                if not link:
+                    continue
+                href = str(link.get("href") or "")
+                if not href.startswith("http"):
+                    continue
+                title = link.get_text(" ", strip=True)
+                snippet = snippet_el.get_text(" ", strip=True) if snippet_el else ""
+                results.append(SearchResult(title=title, url=href, snippet=snippet))
+                if len(results) >= limit:
+                    break
+        return results
+
+
+
+
     async def _playwright_ddg_search(self, query: str, limit: int) -> list[SearchResult]:
-        """DuckDuckGo search via Playwright stealth browser."""
+        """DuckDuckGo search via Playwright stealth browser (fallback)."""
         search_page = await self.context.new_page()
         await self._attach_screencast(search_page)
         await search_page.add_init_script(
@@ -327,6 +532,47 @@ class BrowserWorker:
                 break
         return results
 
+    # ── Page Usability Detection ────────────────────────────────────────
+
+    _BLOCK_MARKERS = [
+        "access denied", "403 forbidden", "401 unauthorized",
+        "captcha", "verify you are human", "verify you are not a robot",
+        "please complete the security check", "robot or human",
+        "enable javascript", "enable cookies", "js required",
+        "sign in to continue", "log in to continue", "login required",
+        "create an account", "subscribe to read", "subscribe to continue",
+        "this page isn't available", "page not found", "404 not found",
+        "sorry, you have been blocked", "unusual traffic", "bot detection",
+        "your connection is not private", "ssl_error", "protocol error",
+        "the page you requested cannot be displayed",
+        "we can't connect to the server", "redirecting...", "just a moment",
+        "cloudflare", "ddos protection", "checking your browser",
+    ]
+
+    def _detect_page_issues(self, text: str, html: str, title: str) -> str | None:
+        """Return a short reason if the page is unusable, else None."""
+        lowered = text.lower()
+        title_low = title.lower()
+
+        # Check for block markers in text or title
+        for marker in self._BLOCK_MARKERS:
+            if marker in lowered or marker in title_low:
+                return f"blocked:{marker[:40]}"
+
+        # Very short / empty pages (often means JS failed or access denied)
+        stripped = text.strip()
+        words = stripped.split()
+        if len(words) < 50:
+            return "too_short_minimal_content"
+
+        # Login / paywall gate (dominant content is auth UI)
+        auth_signals = sum(1 for kw in ["password", "username", "sign in", "log in", "sign up", "forgot password", "email"]
+                          if kw in lowered)
+        if auth_signals >= 4:
+            return "login_wall_detected"
+
+        return None
+
     async def capture_page(self, url: str, screenshot_file: Path | None = None) -> PageCapture:
         if not safety_guard.is_safe_url(url):
             raise ValueError(safety_guard.reason_for_block(url))
@@ -335,7 +581,6 @@ class BrowserWorker:
         try:
             await self.page.evaluate("window.scrollTo(0, 600)")
         except Exception:
-            # Some pages navigate immediately after load; proceed with available content.
             pass
         await self.page.wait_for_timeout(500)
         html = await self.page.content()
@@ -352,14 +597,153 @@ class BrowserWorker:
             "author": _get_meta_content(soup, "author"),
             "published_time": _get_meta_content(soup, "article:published_time"),
         }
+        issue = self._detect_page_issues(text, html, title)
+        metadata["_page_issue"] = issue
         return PageCapture(
-            url=url,
-            title=title,
-            html=html,
-            text=text,
-            screenshot_path=screenshot_path,
-            metadata=metadata,
+            url=url, title=title, html=html, text=text,
+            screenshot_path=screenshot_path, metadata=metadata,
         )
+
+    async def capture_page_safe(
+        self,
+        url: str,
+        screenshot_file: Path | None = None,
+        *,
+        blocked_domains: set[str] | None = None,
+    ) -> PageCapture | None:
+        """Attempt to capture a page with access recovery and UA rotation."""
+        domain = urlparse(url).netloc.replace("www.", "")
+        if blocked_domains and domain in blocked_domains:
+            return None
+
+        # --- Attempt 1: Default Context ---
+        try:
+            page = await self.capture_page(url, screenshot_file)
+            if not page.metadata.get("_page_issue"):
+                return page
+        except Exception:
+            pass
+
+        # --- Attempt 2: Fresh Page + Mobile User-Agent ---
+        retry_page_obj = None
+        try:
+            retry_page_obj = await self.context.new_page()
+            await retry_page_obj.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
+            # Use a realistic mobile UA
+            mobile_ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1"
+            await retry_page_obj.set_extra_http_headers({"User-Agent": mobile_ua})
+            
+            await retry_page_obj.goto(url, wait_until="networkidle", timeout=25000)
+            await retry_page_obj.wait_for_timeout(3000)
+            
+            html2 = await retry_page_obj.content()
+            title2 = await retry_page_obj.title()
+            text2 = await retry_page_obj.locator("body").inner_text()
+            
+            issue2 = self._detect_page_issues(text2, html2, title2)
+            if not issue2:
+                soup2 = BeautifulSoup(html2, "html.parser")
+                metadata2 = {
+                    "description": _get_meta_content(soup2, "description"),
+                    "author": _get_meta_content(soup2, "author"),
+                    "published_time": _get_meta_content(soup2, "article:published_time"),
+                    "_page_issue": None,
+                }
+                ss_path = None
+                if screenshot_file:
+                    screenshot_file.parent.mkdir(parents=True, exist_ok=True)
+                    await retry_page_obj.screenshot(path=str(screenshot_file), full_page=False)
+                    ss_path = str(screenshot_file)
+                return PageCapture(
+                    url=url, title=title2, html=html2, text=text2,
+                    screenshot_path=ss_path, metadata=metadata2,
+                )
+        except Exception:
+            pass
+        finally:
+            if retry_page_obj:
+                try:
+                    await retry_page_obj.close()
+                except Exception:
+                    pass
+
+        if blocked_domains is not None:
+            blocked_domains.add(domain)
+        return None
+
+    async def capture_page_on_new_tab(
+        self,
+        url: str,
+        screenshot_file: Path | None = None,
+        *,
+        blocked_domains: set[str] | None = None,
+    ) -> PageCapture | None:
+        """Capture a page on a dedicated new browser tab — safe for parallel execution.
+
+        Opens a fresh tab, loads the URL, extracts content, and closes the tab when done.
+        Returns None if the page is blocked, too short, or errored. Does NOT fall back to a
+        mobile UA (keeps things fast); the orchestrator can retry via the serial fallback path
+        if needed.
+        """
+        domain = urlparse(url).netloc.replace("www.", "")
+        if blocked_domains and domain in blocked_domains:
+            return None
+        if not safety_guard.is_safe_url(url):
+            return None
+
+        new_page = None
+        try:
+            new_page = await self.context.new_page()
+            await self._attach_screencast(new_page)
+            await new_page.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
+            new_page.set_default_timeout(self.settings.browser_timeout_ms)
+
+            await new_page.goto(url, wait_until="domcontentloaded")
+            await new_page.wait_for_timeout(1500)
+            try:
+                await new_page.evaluate("window.scrollTo(0, 600)")
+            except Exception:
+                pass
+            await new_page.wait_for_timeout(500)
+
+            html = await new_page.content()
+            title = await new_page.title()
+            text = await new_page.locator("body").inner_text()
+
+            # Reject blocked / empty pages immediately (no retry in parallel path)
+            issue = self._detect_page_issues(text, html, title)
+            if issue or len(text.strip()) < 200:
+                return None
+
+            screenshot_path = None
+            if screenshot_file:
+                screenshot_file.parent.mkdir(parents=True, exist_ok=True)
+                await new_page.screenshot(path=str(screenshot_file), full_page=False)
+                screenshot_path = str(screenshot_file)
+
+            soup = BeautifulSoup(html, "html.parser")
+            metadata = {
+                "description": _get_meta_content(soup, "description"),
+                "author": _get_meta_content(soup, "author"),
+                "published_time": _get_meta_content(soup, "article:published_time"),
+                "_page_issue": None,
+            }
+            return PageCapture(
+                url=url, title=title, html=html, text=text,
+                screenshot_path=screenshot_path, metadata=metadata,
+            )
+        except Exception:
+            return None
+        finally:
+            if new_page:
+                try:
+                    await new_page.close()
+                except Exception:
+                    pass
 
     async def _safe_shutdown(self) -> None:
         for cdp in self._cdp_sessions:
@@ -517,7 +901,10 @@ def _filter_results_by_query(query: str, results: list[SearchResult]) -> list[Se
     filtered: list[SearchResult] = []
     from app.utils.text import STOP_WORDS
     query_terms = {term for term in re.findall(r"\w+", query.lower()) if len(term) > 2 and term not in STOP_WORDS}
-    blocked_domain_hints = {"dictionary", "wiktionary.org", "thesaurus.com", "vocabulary.com"}
+    blocked_domain_hints = {
+        "dictionary", "wiktionary.org", "thesaurus.com", "vocabulary.com",
+        "pinterest.com", "instagram.com", "tiktok.com",
+    }
     for result in results:
         domain = urlparse(result.url).netloc.lower()
         if any(hint in domain for hint in blocked_domain_hints):
@@ -526,8 +913,19 @@ def _filter_results_by_query(query: str, results: list[SearchResult]) -> list[Se
         text_terms = set(re.findall(r"\w+", combined.lower()))
         overlap_count = len(query_terms & text_terms)
         overlap_score = keyword_overlap_score(query, combined)
-        if overlap_count >= 2 or overlap_score >= 0.30:
+        # Need at least 2 keyword matches OR a good overlap score
+        if overlap_count >= 2 or overlap_score >= 0.25:
             filtered.append(result)
+    # If filtering was too aggressive, return all non-blocked results
+    if len(filtered) < 3 and len(results) > len(filtered):
+        for result in results:
+            domain = urlparse(result.url).netloc.lower()
+            if any(hint in domain for hint in blocked_domain_hints):
+                continue
+            if result not in filtered:
+                filtered.append(result)
+            if len(filtered) >= 5:
+                break
     return filtered
 
 

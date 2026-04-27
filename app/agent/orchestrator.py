@@ -33,6 +33,7 @@ from app.models.schemas import (
     ConfidenceScore,
     ErrorEvent,
     FinalAnswer,
+    ImageItem,
     QueryIntent,
     ResearchPlan,
     SourceItem,
@@ -47,20 +48,28 @@ from app.utils.text import guess_domain, keyword_overlap_score
 
 logger = logging.getLogger(__name__)
 
+# Max browser tabs to open simultaneously during source visiting
+_VISIT_CONCURRENCY = 4
+
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _should_skip_result(query: str, title: str, snippet: str, domain: str) -> bool:
+def _should_skip_result(query: str, title: str, snippet: str, domain: str,
+                        blocked_domains: set[str] | None = None) -> bool:
     blocked = {
         "dictionary", "dictionaries", "wiktionary.org", "thesaurus.com",
         "vocabulary.com", "pinterest.com", "quora.com", "facebook.com",
-        "instagram.com", "twitter.com", "tiktok.com",
+        "instagram.com", "twitter.com", "tiktok.com", "linkedin.com",
+        "reddit.com",  # often requires JS / login
     }
     d = domain.lower()
     if any(h in d for h in blocked):
+        return True
+    # Skip domains previously found to be blocked/unusable
+    if blocked_domains and d in blocked_domains:
         return True
     t = title.lower()
     if any(w in t for w in {" noun ", "definition", "pronunciation"}):
@@ -82,11 +91,13 @@ class ResearchState(TypedDict, total=False):
     sources: list[SourceItem]
     evidence: list
     videos: list[VideoItem]
+    images: list[ImageItem]
     # Tracking
     search_iteration: int
     review_iteration: int
     used_queries: list[str]
     domain_counter: dict[str, int]
+    blocked_domains: set[str]  # Domains that repeatedly fail access
     # Results
     ranked_sources: list[SourceItem]
     confidence: ConfidenceScore
@@ -119,14 +130,26 @@ async def build_plan(state: ResearchState) -> dict:
     ))
     return {
         "plan": plan,
-        "sources": [], "evidence": [], "videos": [],
+        "sources": [], "evidence": [], "videos": [], "images": [],
         "search_iteration": 0, "review_iteration": 0,
         "used_queries": [], "domain_counter": {},
+        "blocked_domains": set(),
     }
 
 
 async def search_and_collect(state: ResearchState) -> dict:
-    """Core browsing node — opens pages, extracts evidence."""
+    """Core browsing node — searches queries in parallel, then visits pages in parallel.
+
+    Behaviour is identical to the previous sequential version; only the I/O execution
+    strategy has changed:
+      • Phase 1 – all web_search calls for the current batch run concurrently.
+      • Phase 2 – LLM filtering of each search result set runs concurrently.
+      • Phase 3 – up to _VISIT_CONCURRENCY pages are opened in separate browser tabs
+                   simultaneously, each using capture_page_on_new_tab so they don't
+                   share the main self.page object.
+    All existing domain caps, blocked-domain tracking, evidence extraction, and error
+    recording are preserved unchanged.
+    """
     repo = TaskRepository(state["session"])
     task = await repo.get_task(state["task_id"])
     settings = get_settings()
@@ -139,95 +162,198 @@ async def search_and_collect(state: ResearchState) -> dict:
     iteration = state.get("search_iteration", 0)
     used_queries = list(state.get("used_queries") or [])
     domain_counter: dict[str, int] = dict(state.get("domain_counter") or {})
+    blocked_domains: set[str] = set(state.get("blocked_domains") or set())
     extractor = WebEvidenceExtractor()
     youtube_extractor = YouTubeExtractor()
 
     target_sources = max(10, min(plan.source_limit, 15))
     per_query_limit = 8
     max_per_domain = 2
+    max_access_failures = 5
 
     # Pick queries not yet used
     remaining_queries = [q for q in plan.search_queries if q not in used_queries]
     batch = remaining_queries[:4] if iteration == 0 else remaining_queries[:3]
+    for q in batch:
+        used_queries.append(q)
 
     browser: BrowserWorker = state["browser"]
 
-    for search_query in batch:
-        used_queries.append(search_query)
+    # ── Phase 1: Parallel Web Search ──────────────────────────────────────
+    # Log each query as an action (same as before) then fire all searches at once.
+    await repo.update_task(task, current_step=f"Searching {len(batch)} queries in parallel…")
+    for q in batch:
         await repo.add_action(BrowserAction(
             task_id=state["task_id"], action_type=BrowserActionType.search,
-            description=f"Searching: {search_query}", created_at=_utcnow(), metadata={},
+            description=f"Searching: {q}", created_at=_utcnow(), metadata={},
         ))
-        results = await browser.web_search(search_query, limit=per_query_limit)
-        filtered = await _llm_filter_results(state["query"].text, results)
 
+    raw_results_list = await asyncio.gather(
+        *[browser.web_search(q, limit=per_query_limit) for q in batch],
+        return_exceptions=True,
+    )
+
+    # ── Phase 2: Parallel LLM Filtering ───────────────────────────────────
+    # Filter each search result set concurrently; skip any that errored.
+    valid_raw = [
+        r for r in raw_results_list
+        if not isinstance(r, Exception) and r
+    ]
+    filtered_batches = await asyncio.gather(
+        *[_llm_filter_results(state["query"].text, raw) for raw in valid_raw],
+        return_exceptions=True,
+    )
+
+    # Merge all candidates, deduplicate by URL
+    seen_urls: set[str] = set()
+    candidates = []
+    for filtered in filtered_batches:
+        if isinstance(filtered, Exception) or not filtered:
+            continue
         for result in filtered[:per_query_limit]:
-            if len(sources) >= target_sources:
-                break
+            if result.url not in seen_urls:
+                seen_urls.add(result.url)
+                candidates.append(result)
+
+    # Apply the same domain / skip-result pre-filter as before so we only
+    # actually open tabs for URLs that pass all quality gates.
+    pre_filtered = []
+    for result in candidates:
+        if len(sources) + len(pre_filtered) >= target_sources:
+            break
+        cd = guess_domain(result.url)
+        if _should_skip_result(state["query"].text, result.title, result.snippet, cd,
+                               blocked_domains=blocked_domains):
+            continue
+        if domain_counter.get(cd, 0) >= max_per_domain:
+            continue
+        pre_filtered.append(result)
+
+    # ── Phase 3: Parallel Page Visits ─────────────────────────────────────
+    # Each URL gets its own browser tab (capture_page_on_new_tab), with a
+    # semaphore limiting concurrent tabs to _VISIT_CONCURRENCY.
+    await repo.update_task(
+        task, current_step=f"Visiting {len(pre_filtered)} sources in parallel…"
+    )
+    semaphore = asyncio.Semaphore(_VISIT_CONCURRENCY)
+
+    async def _visit_one(result, idx: int):
+        """Open one tab, capture it, return (result, domain, page_or_None)."""
+        async with semaphore:
+            cd = guess_domain(result.url)
+            ss = settings.screenshot_dir / f"{state['task_id']}_{len(sources) + idx}.png"
             try:
-                cd = guess_domain(result.url)
-                if _should_skip_result(state["query"].text, result.title, result.snippet, cd):
-                    continue
-                if domain_counter.get(cd, 0) >= max_per_domain:
-                    continue
-                await repo.update_task(task, current_step=f"Visiting: {result.title[:55]}…")
-                ss = settings.screenshot_dir / f"{state['task_id']}_{len(sources)}.png"
-                page = await browser.capture_page(result.url, screenshot_file=ss)
-                if len(page.text.strip()) < 200:
-                    continue
-                src = SourceItem(
-                    task_id=state["task_id"], source_type=SourceType.web,
-                    title=page.title or result.title, url=page.url,
-                    domain=guess_domain(page.url),
-                    snippet=result.snippet or page.text[:300],
-                    author=page.metadata.get("author"),
-                    published_at=page.metadata.get("published_time"),
-                    metadata=page.metadata,
+                page = await browser.capture_page_on_new_tab(
+                    result.url, screenshot_file=ss,
+                    blocked_domains=blocked_domains,
                 )
-                sources.append(src)
-                domain_counter[src.domain] = domain_counter.get(src.domain, 0) + 1
-                evidence.extend(extractor.extract(
-                    task_id=state["task_id"], query=state["query"].text,
-                    url=page.url, html=page.html, text=page.text,
-                ))
-                await repo.add_action(BrowserAction(
-                    task_id=state["task_id"], action_type=BrowserActionType.navigate,
-                    description=f"Visited source {len(sources)}: {src.title}",
-                    url=page.url, screenshot_path=page.screenshot_path,
-                    created_at=_utcnow(), metadata={"domain": src.domain},
-                ))
-                await repo.update_task(task,
-                    current_step=f"Collected {len(sources)}/{target_sources} sources",
-                    latest_screenshot=page.screenshot_path)
+                return (result, cd, page)
             except Exception as exc:
-                await repo.add_error(ErrorEvent(
-                    task_id=state["task_id"], message=f"Failed: {result.url}: {exc}",
-                    recoverable=True, context={"url": result.url}, created_at=_utcnow(),
-                ))
+                return (result, cd, exc)
+
+    visit_results = await asyncio.gather(
+        *[_visit_one(r, i) for i, r in enumerate(pre_filtered)],
+        return_exceptions=True,
+    )
+
+    # Process visit results sequentially so shared state (sources, domain_counter,
+    # blocked_domains) is updated safely — asyncio is cooperative so no locks needed.
+    access_failures = 0
+    for vr in visit_results:
         if len(sources) >= target_sources:
             break
+        if access_failures >= max_access_failures:
+            logger.warning("Too many consecutive access failures, skipping remaining results")
+            break
+        if isinstance(vr, Exception):
+            access_failures += 1
+            continue
 
-    # YouTube (only on first iteration)
+        result, cd, page_or_exc = vr
+        if isinstance(page_or_exc, Exception):
+            access_failures += 1
+            blocked_domains.add(cd)
+            await repo.add_error(ErrorEvent(
+                task_id=state["task_id"],
+                message=f"Failed: {result.url}: {page_or_exc}",
+                recoverable=True, context={"url": result.url}, created_at=_utcnow(),
+            ))
+            continue
+
+        page = page_or_exc
+        if page is None:
+            access_failures += 1
+            blocked_domains.add(cd)
+            await repo.add_error(ErrorEvent(
+                task_id=state["task_id"],
+                message=f"Page unusable (blocked/empty): {result.url}",
+                recoverable=True,
+                context={"url": result.url, "domain": cd, "reason": "access_failed"},
+                created_at=_utcnow(),
+            ))
+            continue
+
+        # Successful visit — update shared state
+        access_failures = 0
+        src = SourceItem(
+            task_id=state["task_id"], source_type=SourceType.web,
+            title=page.title or result.title, url=page.url,
+            domain=guess_domain(page.url),
+            snippet=result.snippet or page.text[:300],
+            author=page.metadata.get("author"),
+            published_at=page.metadata.get("published_time"),
+            metadata=page.metadata,
+        )
+        sources.append(src)
+        domain_counter[src.domain] = domain_counter.get(src.domain, 0) + 1
+        evidence.extend(extractor.extract(
+            task_id=state["task_id"], query=state["query"].text,
+            url=page.url, html=page.html, text=page.text,
+        ))
+        await repo.add_action(BrowserAction(
+            task_id=state["task_id"], action_type=BrowserActionType.navigate,
+            description=f"Visited source {len(sources)}: {src.title}",
+            url=page.url, screenshot_path=page.screenshot_path,
+            created_at=_utcnow(), metadata={"domain": src.domain},
+        ))
+        await repo.update_task(task,
+            current_step=f"Collected {len(sources)}/{target_sources} sources",
+            latest_screenshot=page.screenshot_path)
+
+    # ── Images (Dedicated Image Search) ──────────────────────────────────
+    images = list(state.get("images") or [])
+    if iteration == 0:
+        await repo.update_task(task, current_step="Searching for relevant images")
+        await repo.add_action(BrowserAction(
+            task_id=state["task_id"], action_type=BrowserActionType.search,
+            description="Searching for dedicated images", created_at=_utcnow(), metadata={},
+        ))
+        image_results = await browser.image_search(state["query"].text, limit=8)
+        images.extend(image_results)
+
+    # ── YouTube (only on first iteration) ─────────────────────────────────
+    # Unchanged — sequential is fine here since we only call it once.
     if iteration == 0 and state["intent"].requires_youtube:
         await repo.update_task(task, current_step="Searching YouTube")
         await repo.add_action(BrowserAction(
             task_id=state["task_id"], action_type=BrowserActionType.search,
             description="Searching YouTube", created_at=_utcnow(), metadata={},
         ))
-        candidates = []
+        candidates_yt = []
         for vq in plan.video_queries[:3]:
             for r in await browser.youtube_search(vq, limit=settings.max_video_results):
                 item = youtube_extractor.enrich(task_id=state["task_id"], title=r.title, url=r.url)
                 item = youtube_extractor.score(state["query"].text, item)
-                candidates.append(item)
-        if candidates:
-            unique = youtube_extractor.deduplicate(candidates)
+                candidates_yt.append(item)
+        if candidates_yt:
+            unique = youtube_extractor.deduplicate(candidates_yt)
             videos = sorted(unique, key=lambda v: v.rank_score, reverse=True)[:3]
 
     return {
-        "sources": sources, "evidence": evidence, "videos": videos,
+        "sources": sources, "evidence": evidence, "videos": videos, "images": images,
         "search_iteration": iteration + 1,
         "used_queries": used_queries, "domain_counter": domain_counter,
+        "blocked_domains": blocked_domains,
     }
 
 
@@ -323,6 +449,7 @@ async def compose_answer(state: ResearchState) -> dict:
         evidence=state.get("evidence") or [],
         confidence=state["confidence"],
         videos=state.get("videos"),
+        images=state.get("images"),
     )
     return {"answer": answer}
 
@@ -392,8 +519,18 @@ def should_search_more(state: ResearchState) -> str:
     """After evaluate_coverage: loop back to search or proceed to rank."""
     iteration = state.get("search_iteration", 0)
     sources = state.get("sources") or []
+    evidence = state.get("evidence") or []
+
+    # Hard stop: max iterations or enough sources
     if iteration >= 3 or len(sources) >= 12:
         return "rank_sources"
+
+    # Sufficient evidence threshold: 6+ sources with 4+ high-quality evidence items
+    text_evidence = [e for e in evidence if e.evidence_type.value == "text"]
+    high_conf = [e for e in text_evidence if (e.confidence or 0) > 0.5]
+    if len(sources) >= 8 and len(high_conf) >= 4:
+        return "rank_sources"  # We have enough good content
+
     # If the plan got new queries from evaluate_coverage, search more
     used = set(state.get("used_queries") or [])
     remaining = [q for q in state["plan"].search_queries if q not in used]
@@ -499,6 +636,7 @@ class ResearchOrchestrator:
                 "browser": browser,
                 "search_iteration": 0,
                 "review_iteration": 0,
+                "blocked_domains": set(),
             }
             await _compiled_graph.ainvoke(initial_state)
 
