@@ -84,6 +84,7 @@ python -m uvicorn app.main:app --reload
 ## 🏗️ Architecture
 
 - **`app/agent`**: The "Brain" containing the LangGraph orchestrator, planning logic, and answer synthesis.
+- **`app/agent/task_automation`**: The "Task Automation Agent" vertical for action-oriented workflows (plan → execute → extract → compose).
 - **`app/browser`**: The "Hands" managing Playwright instances, screencasting, and search execution.
 - **`app/extraction`**: Specialized logic for pulling clean data from messy HTML and YouTube.
 - **`app/ranking`**: Multi-dimensional scoring for sources and media relevance.
@@ -99,3 +100,23 @@ python -m uvicorn app.main:app --reload
 *   **Stealth**: The browser worker uses standard stealth headers to ensure high success rates on enterprise sites.
 
 ---
+
+## ⚡ Task Automation Agent (New Vertical)
+
+This repo includes a second vertical: **Task Automation Agent** — focused on *executing multi-step browser workflows* (not long-form research).
+
+### UI
+- **Research Agent**: open `http://localhost:8000/` (default)
+- **Task Automation Agent**: open `http://localhost:8000/ui/task_automation.html`
+  - You can also navigate to it from the left sidebar in the Research UI.
+
+### API
+Run a task automation workflow via:
+- `POST /api/automation/run`
+
+Example payload:
+
+```json
+{ "query": "Find laptops under 80000 with 16GB RAM" }
+```
+

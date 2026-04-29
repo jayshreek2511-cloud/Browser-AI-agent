@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router as api_router
+from app.api.task_automation_routes import router as automation_router
 from app.core.config import get_settings
 from app.core.database import init_db
 from app.core.logging import configure_logging
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.include_router(api_router)
+    app.include_router(automation_router)
     ui_directory = Path(__file__).resolve().parent / "ui"
     app.mount("/ui", StaticFiles(directory=str(ui_directory)), name="ui")
     return app

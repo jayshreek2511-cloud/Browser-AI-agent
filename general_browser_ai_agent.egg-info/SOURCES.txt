@@ -8,8 +8,16 @@ app/agent/intake.py
 app/agent/orchestrator.py
 app/agent/planner.py
 app/agent/verification.py
+app/agent/task_automation/__init__.py
+app/agent/task_automation/composer.py
+app/agent/task_automation/controller.py
+app/agent/task_automation/executor.py
+app/agent/task_automation/extractor.py
+app/agent/task_automation/planner.py
+app/agent/task_automation/schema.py
 app/api/__init__.py
 app/api/routes.py
+app/api/task_automation_routes.py
 app/browser/__init__.py
 app/browser/worker.py
 app/core/__init__.py
@@ -17,6 +25,7 @@ app/core/config.py
 app/core/database.py
 app/core/llm.py
 app/core/logging.py
+app/core/stream.py
 app/extraction/__init__.py
 app/extraction/web.py
 app/extraction/youtube.py
