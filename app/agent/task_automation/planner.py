@@ -27,6 +27,10 @@ class TaskPlanner:
         if direct_url:
             return self._url_plan(query, direct_url)
 
+        # Specialized Flight Pipeline
+        if detect_intent(query) == "flight":
+            return self._flight_plan(query)
+
         settings = get_settings()
         if llm_client.enabled:
             planned = await self._plan_with_llm(query, settings.llm_model_planner)
@@ -35,6 +39,37 @@ class TaskPlanner:
                 return planned
 
         return self._fallback_plan(query)
+
+    def _flight_plan(self, query: str) -> ActionPlan:
+        from .flight_utils import extract_flight_params, resolve_date, get_flight_search_urls
+        from .schema import ActionStep, TaskIntent
+
+        params = extract_flight_params(query)
+        date_obj = resolve_date(params["date_str"])
+        urls = get_flight_search_urls(params["origin"], params["destination"], date_obj)
+        
+        steps = []
+        for url in urls:
+            steps.append(ActionStep(step=len(steps)+1, action="open_result", params={"url": url}))
+            steps.append(ActionStep(step=len(steps)+1, action="extract_list", params={"max_items": 20}))
+        
+        steps.append(ActionStep(step=len(steps)+1, action="rank", params={"top_k": 8}))
+        steps.append(ActionStep(step=len(steps)+1, action="stop", params={}))
+        
+        return ActionPlan(
+            intent=TaskIntent.travel,
+            objective=f"Find flights from {params['origin']} to {params['destination']} on {date_obj.strftime('%d %b')}",
+            constraints={
+                "origin": params["origin"],
+                "destination": params["destination"],
+                "date": date_obj.strftime("%d/%m/%Y"),
+                "time_pref": params["time_pref"],
+                "vertical": "flight"
+            },
+            search_queries=[],
+            steps=steps,
+            stop_when={"min_results": 10},
+        )
 
     async def _plan_with_llm(self, query: str, model: str) -> ActionPlan | None:
         system_prompt = (

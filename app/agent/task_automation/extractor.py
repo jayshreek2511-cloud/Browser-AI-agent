@@ -16,6 +16,30 @@ _PRODUCT_ALLOW_DOMAINS = {
     "reliancedigital.in",
     "tatacliq.com",
     "vijaysales.com",
+    "91mobiles.com",
+    "gadgets360.com",
+    "mysmartprice.com",
+    "digit.in",
+    "smartprix.com",
+}
+
+_FLIGHT_ALLOW_DOMAINS = {
+    "ixigo.com",
+    "skyscanner.com",
+    "kayak.com",
+    "makemytrip.com",
+    "easemytrip.com",
+    "cleartrip.com",
+    "goibibo.com",
+}
+
+_HOTEL_ALLOW_DOMAINS = {
+    "booking.com",
+    "agoda.com",
+    "tripadvisor.com",
+    "goibibo.com",
+    "makemytrip.com",
+    "hotels.com",
 }
 
 _BLOCK_DOMAINS = {
@@ -53,25 +77,51 @@ class ResultExtractor:
         user_query: str | None = None,
         intent: str | None = None,
     ) -> list[NormalizedItem]:
-        soup = BeautifulSoup(html or "", "html.parser")
         inferred_intent = intent or (detect_intent(user_query or "") if user_query else "general")
+        
+        # Specialized Flight Pipeline Delegation
+        if inferred_intent == "flight":
+            try:
+                from .flight_extractor import FlightExtractor
+                from .flight_utils import extract_flight_params
+                f_params = extract_flight_params(user_query or "")
+                f_extractor = FlightExtractor()
+                return f_extractor.extract(
+                    html=html,
+                    base_url=base_url,
+                    time_pref=f_params.get("time_pref"),
+                    target_date=f_params.get("date_str")
+                )
+            except Exception as e:
+                print(f"[TaskAutomationExtractor] Flight delegation failed: {e}")
+                # fall back to default logic if something goes wrong
+        
+        soup = BeautifulSoup(html or "", "html.parser")
         domain = _domain_from_url(base_url)
 
-        # Domain filtering for product tasks: only allow commercial sources.
-        if inferred_intent == "product":
+        # Domain filtering for product/travel tasks: only allow commercial/trusted sources.
+        if inferred_intent in {"product", "flight", "hotel"}:
             if domain and domain in _BLOCK_DOMAINS:
                 print(f"[TaskAutomationExtractor] blocked_domain={domain}")
                 return []
-            if domain and domain not in _PRODUCT_ALLOW_DOMAINS:
+            
+            allowed = set()
+            if inferred_intent == "product": allowed = _PRODUCT_ALLOW_DOMAINS
+            elif inferred_intent == "flight": allowed = _FLIGHT_ALLOW_DOMAINS
+            elif inferred_intent == "hotel": allowed = _HOTEL_ALLOW_DOMAINS
+            
+            if domain and domain not in allowed:
                 print(f"[TaskAutomationExtractor] skip_non_commercial_domain={domain}")
                 return []
 
-            # Skip blog/review/SEO pages for product extraction.
+            # Skip blog/review/SEO pages.
             page_text = soup.get_text(" ", strip=True).lower()
             blog_markers = ["top 10", "best", "guide", "review", "alternatives"]
             if any(m in page_text for m in blog_markers):
-                print("[TaskAutomationExtractor] skip_blog_like_page")
-                return []
+                # Trust domains in allowed set to bypass blog filter (they often have review-like keywords).
+                if domain not in allowed:
+                    print("[TaskAutomationExtractor] skip_blog_like_page")
+                    return []
 
         # Broader but smarter selectors (higher recall on modern sites).
         selectors = [
@@ -104,15 +154,13 @@ class ResultExtractor:
                 break
 
             text = node.get_text(" ", strip=True)
-            print("CANDIDATE:", text[:120])
-
             name = _guess_name(node, text)
-            if not name:
-                continue
-
             price = _parse_price(text, node=node)
             rating = _parse_rating(text)
             link = _extract_link(node, base_url)
+
+            if not name:
+                continue
 
             # Junk filter (CRITICAL)
             if _is_junk_item(name, text):
@@ -127,7 +175,8 @@ class ResultExtractor:
                     continue
 
             # Relevance scoring (filter out irrelevant UI labels)
-            if user_query and _score_item(name, text, user_query) < 3:
+            score = _score_item(name, text, user_query) if user_query else 5
+            if user_query and score < 3:
                 continue
 
             items.append(
@@ -205,7 +254,8 @@ def _parse_price(text: str, *, node=None) -> float | None:
     blob = " | ".join(chunks)
 
     patterns = [
-        r"(?:₹|rs\.?|inr)\s*([\d,]{3,})",
+        r"(?:price:?|starting\s+at)?\s*(?:₹|rs\.?|inr)\s*([\d,]{3,})",
+        r"(?:price:?|starting\s+at)\s*([\d,]{3,})",
         r"starting\s+from\s*(?:₹|rs\.?|inr)\s*([\d,]{3,})",
     ]
 
@@ -225,7 +275,15 @@ def _parse_price(text: str, *, node=None) -> float | None:
 
 
 def _parse_rating(text: str) -> float | None:
-    m = re.search(r"(\d\.\d)\s*(/5|out of 5|stars?)", text, flags=re.IGNORECASE)
+    # Try specific "Rating: X.X" first (common in comparison sites)
+    m = re.search(r"rating:?\s*(\d\.\d)", text, flags=re.IGNORECASE)
+    if not m:
+        # Try star ratings (e.g. "5 star", "4.5 stars")
+        m = re.search(r"(\d(?:\.\d)?)\s*(?:star|-star)", text, flags=re.IGNORECASE)
+    if not m:
+        # Fallback to suffix-based ratings (e.g. 4.5/5 or 4.5 stars)
+        m = re.search(r"(\d\.\d)\s*(/5|out of 5|stars?)", text, flags=re.IGNORECASE)
+
     if not m:
         return None
     try:
@@ -351,24 +409,25 @@ def _prefer_structured(items: list[NormalizedItem], *, keep: int) -> list[Normal
 
 def _is_junk_item(name: str, text: str) -> bool:
     lowered = (f"{name} {text}").lower()
-    junk_keywords = [
-        "search",
-        "filter",
-        "sort",
-        "login",
-        "sign in",
-        "economy class",
-        "business class",
-        "premium economy",
-        "menu",
-        "navigation",
-        "home",
-        "explore",
-        "categories",
-        "options",
+    junk_patterns = [
+        r"\bsearch\b",
+        r"\bfilter\b",
+        r"\bsort\b",
+        r"\blogin\b",
+        r"\bsign in\b",
+        r"\bmenu\b",
+        r"\bnavigation\b",
+        r"\bhome\b",
+        r"\bexplore\b",
+        r"\bcategories\b",
+        r"\boptions\b",
+        r"economy class",
+        r"business class",
+        r"premium economy",
     ]
-    if any(k in lowered for k in junk_keywords):
-        return True
+    for pat in junk_patterns:
+        if re.search(pat, lowered):
+            return True
     if len(name.split()) < 2:
         return True
     return False
@@ -390,5 +449,10 @@ def _score_item(name: str, text: str, query: str) -> int:
         score += 2
     if _parse_rating(text) is not None:
         score += 1
+    
+    # Heuristic for airport codes (e.g. DEL, BOM, DXB)
+    if re.search(r"\b[A-Z]{3}\b", name + text):
+        score += 1
+        
     return score
 

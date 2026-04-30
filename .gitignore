@@ -1,8 +1,11 @@
 .env
 .pytest_cache/
 .ruff_cache/
-.venv/
 __pycache__/
 *.pyc
 agent.db
+.venv/
 artifacts/
+.gemini/
+.idea/
+.vscode/
