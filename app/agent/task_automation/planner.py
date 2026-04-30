@@ -205,12 +205,19 @@ def _expand_search_queries(
     for site in sources:
         queries.append(f"{base} site:{site}")
 
-    # 2–3 generic high-quality variants (review/comparison)
-    generic_variants = [
-        base,
-        f"{base} review",
-        f"{base} comparison",
-    ]
+    # 2–3 generic variants. For product intent, prefer commercial intent.
+    if inferred == "product":
+        generic_variants = [
+            f"buy {base}",
+            f"{base} price",
+            f"{base} offers",
+        ]
+    else:
+        generic_variants = [
+            base,
+            f"{base} review",
+            f"{base} comparison",
+        ]
     for v in generic_variants:
         queries.append(v)
 
@@ -224,6 +231,9 @@ def _expand_search_queries(
     for q in queries:
         q2 = " ".join(str(q).split()).strip()
         if not q2 or is_bad_query(q2):
+            continue
+        # De-prioritize marketplace-only searches; keep marketplaces only via trusted-sources list.
+        if ("amazon" in q2.lower() or "flipkart" in q2.lower()) and "site:" not in q2.lower():
             continue
         key = q2.lower()
         if key in seen:

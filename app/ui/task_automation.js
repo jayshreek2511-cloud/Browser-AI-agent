@@ -55,12 +55,17 @@ function renderResult(payload) {
              .map(
                (r) => `
              <div class="stack-item" style="border-bottom: 1px solid var(--outline-variant); padding-bottom: 12px; margin-bottom: 12px;">
-               <p><strong>${escapeHtml(r.name || "Item")}</strong></p>
-               <p style="font-size:0.85em;">
-                 ${r.price != null ? `Price: ${escapeHtml(r.price)}` : "Price: n/a"}
-                 ${r.rating != null ? ` | Rating: ${escapeHtml(r.rating)}` : ""}
-               </p>
-               ${r.link ? `<a class="source-link" href="${escapeHtml(r.link)}" target="_blank">${escapeHtml(r.link)}</a>` : ""}
+              <p><strong>${escapeHtml(r.name || r.source_domain || "Website")}</strong></p>
+              ${r.source_domain ? `<p style="font-size:0.82em;color:var(--on-surface-variant); margin-top:2px;">Source: ${escapeHtml(r.source_domain)}</p>` : ""}
+              ${(r.price != null || r.rating != null)
+                ? `<p style="font-size:0.85em; margin-top:6px;">
+                    ${r.price != null ? `<span>Price: ${escapeHtml(r.price)}</span>` : ""}
+                    ${r.rating != null ? `<span>${r.price != null ? " | " : ""}Rating: ${escapeHtml(r.rating)}</span>` : ""}
+                   </p>`
+                : ""
+              }
+              ${r.snippet ? `<p style="font-size:0.85em;color:var(--on-surface-variant); margin-top:6px;">${escapeHtml(String(r.snippet).slice(0, 220))}</p>` : ""}
+              ${ (r.link) ? `<a class="source-link" href="${escapeHtml(r.link)}" target="_blank">Open website</a>` : "" }
              </div>`
              )
              .join("")}

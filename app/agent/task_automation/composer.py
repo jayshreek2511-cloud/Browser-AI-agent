@@ -28,6 +28,7 @@ class ResultComposer:
                 "rating": it.rating,
                 "link": it.link,
                 "source_domain": it.source_domain,
+                "snippet": (it.raw or {}).get("snippet") or (it.raw or {}).get("text", "")[:180],
             }
             for it in ranked
         ]

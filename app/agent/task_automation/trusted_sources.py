@@ -11,10 +11,17 @@ TRUSTED_SOURCES: dict[str, list[str]] = {
         "makemytrip.com",
     ],
     "product": [
-        "91mobiles.com",
-        "gsmarena.com",
         "amazon.in",
         "flipkart.com",
+        "croma.com",
+        "reliancedigital.in",
+        "tatacliq.com",
+        "vijaysales.com",
+    ],
+    "hotel": [
+        "booking.com",
+        "agoda.com",
+        "tripadvisor.com",
     ],
     "general": [],
 }
@@ -23,11 +30,11 @@ TRUSTED_SOURCES: dict[str, list[str]] = {
 def detect_intent(query: str) -> str:
     q = (query or "").lower()
 
-    if "flight" in q or "travel" in q:
+    if any(k in q for k in ["flight", "airline", "travel", "route"]):
         return "flight"
-    if "hotel" in q:
+    if any(k in q for k in ["hotel", "stay"]):
         return "hotel"
-    if "buy" in q or "under" in q:
+    if any(k in q for k in ["under", "buy", "price", "budget", "compare"]):
         return "product"
 
     return "general"
