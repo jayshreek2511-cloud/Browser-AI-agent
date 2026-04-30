@@ -4,8 +4,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Task Automation Agent</title>
-  <meta name="description" content="Action-oriented browser automation agent." />
+  <title>Deals & Price Tracker Agent</title>
+  <meta name="description" content="Compare prices, track deals, and set alerts across top e-commerce stores." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -13,7 +13,7 @@
     rel="stylesheet" />
   <link href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined" rel="stylesheet" />
   <link rel="stylesheet" href="/ui/styles.css?v=6" />
-  <link rel="stylesheet" href="/ui/task_automation.css?v=1" />
+  <link rel="stylesheet" href="/ui/deals.css?v=1" />
 </head>
 
 <body>
@@ -24,23 +24,23 @@
           <span class="material-symbols-outlined">neurology</span>
           <span class="logo-text">AI Browser Agent</span>
         </div>
-        <button class="new-chat-btn" id="new-automation-chat">
+        <button class="new-chat-btn" id="new-deals-chat">
           <span class="material-symbols-outlined">add_notes</span>
           <span>New Chat</span>
         </button>
       </div>
       <nav class="sidebar-nav">
         <a class="nav-item active">
-          <span class="material-symbols-outlined">bolt</span>
-          <span>Task Automation</span>
+          <span class="material-symbols-outlined">local_offer</span>
+          <span>Deals Tracker</span>
         </a>
         <a class="nav-item" href="/ui/index.html?view=research" style="text-decoration:none;">
           <span class="material-symbols-outlined">search</span>
           <span>Research</span>
         </a>
-        <a class="nav-item" href="/ui/deals.html" style="text-decoration:none;">
-          <span class="material-symbols-outlined">local_offer</span>
-          <span>Deals Tracker</span>
+        <a class="nav-item" href="/ui/task_automation.html" style="text-decoration:none;">
+          <span class="material-symbols-outlined">bolt</span>
+          <span>Task Automation</span>
         </a>
         <a class="nav-item" href="/ui/index.html?view=library" style="text-decoration:none;">
           <span class="material-symbols-outlined">auto_stories</span>
@@ -56,28 +56,29 @@
     </aside>
 
     <main class="main-area">
-      <div class="chat-column" id="view-automation">
+      <div class="chat-column" id="view-deals">
         <header class="chat-header">
           <button class="icon-btn sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">
             <span class="material-symbols-outlined">menu</span>
           </button>
           <div class="header-info">
-            <h1>Task Automation Agent</h1>
+            <h1>Deals & Price Tracker</h1>
           </div>
         </header>
 
-        <section id="automation-thread" class="chat-thread">
+        <section id="deals-thread" class="chat-thread">
           <article class="message assistant-message">
-            <p>Describe a task (shopping, flights, comparisons). I will generate an action plan and attempt to execute it safely.</p>
+            <p>Search for any product to compare prices, track history, and find the best deals across top stores.</p>
           </article>
         </section>
 
-        <form id="automation-form" class="composer">
-          <label class="sr-only" for="automation-query">Automation task</label>
+        <form id="deals-form" class="composer">
+          <label class="sr-only" for="deals-query">Search for deals</label>
           <div class="composer-inner">
-            <textarea id="automation-query" placeholder="e.g., Find laptops under 80000 with 16GB RAM" rows="1"></textarea>
-            <button type="submit" title="Run Task Automation">
-              <span class="material-symbols-outlined">play_arrow</span>
+            <textarea id="deals-query"
+              placeholder="e.g., iPhone 15 128GB or paste a product URL..." rows="1"></textarea>
+            <button type="submit" title="Search Deals">
+              <span class="material-symbols-outlined">search</span>
             </button>
           </div>
         </form>
@@ -85,12 +86,12 @@
     </main>
   </div>
 
-  <script src="/ui/task_automation.js?v=1" defer></script>
+  <script src="/ui/deals.js?v=1" defer></script>
   <script>
     document.getElementById('sidebar-toggle').addEventListener('click', () => {
       document.getElementById('app-shell').classList.toggle('sidebar-collapsed');
     });
-    const ta = document.getElementById('automation-query');
+    const ta = document.getElementById('deals-query');
     ta.addEventListener('input', () => {
       ta.style.height = 'auto';
       ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
@@ -98,11 +99,10 @@
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        document.getElementById('automation-form').requestSubmit();
+        document.getElementById('deals-form').requestSubmit();
       }
     });
   </script>
 </body>
 
 </html>
-

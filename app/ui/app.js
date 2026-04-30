@@ -20,16 +20,25 @@ initNewChat(true); // first launch — creates a blank chat
 loadLibraryFromServer();
 
 // ── View switching (sidebar nav) ──────────────────────────────────────
+function switchView(view) {
+  document.querySelectorAll(".nav-item[data-view]").forEach(n => n.classList.remove("active"));
+  const navItem = document.querySelector(`.nav-item[data-view="${view}"]`);
+  if (navItem) navItem.classList.add("active");
+  document.getElementById("view-research").style.display = (view === "research") ? "flex" : "none";
+  document.getElementById("view-library").style.display  = (view === "library")  ? "flex" : "none";
+  if (view === "library") renderLibrary();
+}
+
 document.querySelectorAll(".nav-item[data-view]").forEach(item => {
   item.addEventListener("click", () => {
-    const view = item.dataset.view;
-    document.querySelectorAll(".nav-item[data-view]").forEach(n => n.classList.remove("active"));
-    item.classList.add("active");
-    document.getElementById("view-research").style.display = (view === "research") ? "flex" : "none";
-    document.getElementById("view-library").style.display  = (view === "library")  ? "flex" : "none";
-    if (view === "library") renderLibrary();
+    switchView(item.dataset.view);
   });
 });
+
+// Handle query params for view switching
+const urlParams = new URLSearchParams(window.location.search);
+const initialView = urlParams.get("view") || "research";
+switchView(initialView);
 
 // ── New Chat button ───────────────────────────────────────────────────
 document.getElementById("new-chat-btn").addEventListener("click", () => {
@@ -500,24 +509,60 @@ async function loadLibraryFromServer() {
 function renderLibrary() {
   const listEl = document.getElementById("library-list");
   if (!listEl) return;
-  // Merge in-memory chats + server tasks
-  const entries = [...allChats];
+  
+  // Merge in-memory chats + server tasks + automation history + deals history
+  const automationHistory = JSON.parse(localStorage.getItem("automation_history") || "[]");
+  const dealsHistory = JSON.parse(localStorage.getItem("deals_history") || "[]");
+  const entries = [
+    ...allChats,
+    ...automationHistory.map(h => ({
+      id: h.id,
+      label: h.query.slice(0, 60),
+      type: "automation",
+      timestamp: h.timestamp,
+      payload: h.payload
+    })),
+    ...dealsHistory.map(h => ({
+      id: h.id,
+      label: h.query.slice(0, 60),
+      type: "deals",
+      timestamp: h.timestamp,
+      payload: h.payload
+    }))
+  ];
+
   if (!entries.length) {
     listEl.innerHTML = `
       <div class="library-empty">
         <span class="material-symbols-outlined" style="font-size:48px;color:var(--muted);">auto_stories</span>
-        <p>No past research sessions yet.</p>
+        <p>No past research or automation sessions yet.</p>
       </div>
     `;
     return;
   }
+
+  // Sort by timestamp if available, else original order
+  entries.sort((a, b) => {
+    const tA = a.timestamp || 0;
+    const tB = b.timestamp || 0;
+    return tB > tA ? 1 : -1;
+  });
+
   listEl.innerHTML = entries.map(chat => {
-    const statusIcon = chat.serverTask
-      ? (chat.serverTask.status === "completed" ? "check_circle" : chat.serverTask.status === "failed" ? "error" : "pending")
-      : "history";
-    const statusColor = chat.serverTask
-      ? (chat.serverTask.status === "completed" ? "var(--secondary)" : chat.serverTask.status === "failed" ? "var(--error)" : "var(--primary)")
-      : "var(--muted)";
+    let statusIcon = "history";
+    let statusColor = "var(--muted)";
+    
+    if (chat.type === "automation") {
+      statusIcon = "bolt";
+      statusColor = "var(--primary)";
+    } else if (chat.type === "deals") {
+      statusIcon = "local_offer";
+      statusColor = "var(--secondary)";
+    } else if (chat.serverTask) {
+      statusIcon = chat.serverTask.status === "completed" ? "check_circle" : chat.serverTask.status === "failed" ? "error" : "pending";
+      statusColor = chat.serverTask.status === "completed" ? "var(--secondary)" : chat.serverTask.status === "failed" ? "var(--error)" : "var(--primary)";
+    }
+
     return `
       <div class="library-card" onclick="loadChatOrTask('${chat.id}')">
         <div class="library-card-icon">
@@ -525,7 +570,7 @@ function renderLibrary() {
         </div>
         <div class="library-card-info">
           <p class="library-card-title">${escapeHtml(chat.label)}</p>
-          <p class="library-card-meta">${chat.taskIds.length} task(s)</p>
+          <p class="library-card-meta">${chat.type === "automation" ? "Task Automation" : chat.type === "deals" ? "Deals Tracker" : (chat.taskIds.length + " task(s)")}</p>
         </div>
         <span class="material-symbols-outlined" style="color:var(--muted);font-size:18px;">chevron_right</span>
       </div>
@@ -535,6 +580,22 @@ function renderLibrary() {
 
 // Make loadChatOrTask global for onclick
 window.loadChatOrTask = function(chatId) {
+  // Check deals history
+  const dealsHistory = JSON.parse(localStorage.getItem("deals_history") || "[]");
+  const dealsEntry = dealsHistory.find(h => h.id === chatId);
+  if (dealsEntry) {
+    window.location.href = `/ui/deals.html?historyId=${chatId}`;
+    return;
+  }
+
+  // Check automation history
+  const automationHistory = JSON.parse(localStorage.getItem("automation_history") || "[]");
+  const autoEntry = automationHistory.find(h => h.id === chatId);
+  if (autoEntry) {
+    window.location.href = `/ui/task_automation.html?historyId=${chatId}`;
+    return;
+  }
+
   const chat = allChats.find(c => c.id === chatId);
   if (!chat) return;
   if (chat.html) {

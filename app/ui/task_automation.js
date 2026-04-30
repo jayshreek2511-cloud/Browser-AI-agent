@@ -29,12 +29,49 @@ function renderResult(payload) {
   const logs = payload?.execution?.logs || [];
   const results = output?.results || [];
 
-  const planHtml = plan
+  const planHtml = plan?.steps
     ? `<div class="automation-card" style="margin-bottom:12px;">
          <h3>Generated Action Plan</h3>
-         <div class="code-like">${escapeHtml(JSON.stringify(plan, null, 2))}</div>
+         <div class="stack">
+           ${plan.steps
+             .map(
+               (s) => `
+             <div style="display:flex; gap:12px; margin-bottom:6px; font-size:0.95em;">
+               <span style="color:var(--primary); font-weight:600; min-width:24px;">${s.step}.</span>
+               <span>${escapeHtml(formatActionSentence(s, plan))}</span>
+             </div>`
+             )
+             .join("")}
+         </div>
        </div>`
     : "";
+
+  function formatActionSentence(step, plan) {
+    const { action, params } = step;
+    switch (action) {
+      case "search":
+        const idx = params.query_index ?? 0;
+        const q = plan.search_queries?.[idx]?.text || "relevant items";
+        return `Search the web for "${q}"`;
+      case "open_result":
+        if (params.url) return `Navigate to ${params.url}`;
+        return `Open search result #${(params.result_index ?? 0) + 1}`;
+      case "extract_list":
+        return `Extract structured information from the page content`;
+      case "extract_detail":
+        return `Analyze the page for deep details and evidence`;
+      case "click":
+        return `Interact with the page by clicking "${params.selector}"`;
+      case "type":
+        return `Enter "${params.text}" into the "${params.selector}" field`;
+      case "rank":
+        return `Process and rank the collected results for accuracy`;
+      case "stop":
+        return `Task successfully completed`;
+      default:
+        return action;
+    }
+  }
 
   const logsHtml = logs.length
     ? `<div class="automation-card" style="margin-bottom:12px;">
@@ -109,8 +146,48 @@ form.addEventListener("submit", async (event) => {
       return;
     }
     renderResult(payload);
+    saveToHistory(query, payload);
   } catch (e) {
     appendAssistantHtml(`<div class="automation-card"><h3>Error</h3><p>Network error.</p></div>`);
   }
+});
+
+function saveToHistory(query, payload) {
+  const history = JSON.parse(localStorage.getItem("automation_history") || "[]");
+  const entry = {
+    id: "auto-" + Date.now(),
+    type: "automation",
+    query: query,
+    timestamp: new Date().toISOString(),
+    payload: payload
+  };
+  history.unshift(entry);
+  localStorage.setItem("automation_history", JSON.stringify(history.slice(0, 50)));
+}
+
+// ── History loading ───────────────────────────────────────────────────
+function handleHistoryLoad() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const historyId = urlParams.get("historyId");
+  if (!historyId) return;
+
+  const history = JSON.parse(localStorage.getItem("automation_history") || "[]");
+  const entry = history.find(h => h.id === historyId);
+  if (entry) {
+    appendUserMessage(entry.query);
+    renderResult(entry.payload);
+  }
+}
+
+handleHistoryLoad();
+
+document.getElementById("new-automation-chat").addEventListener("click", () => {
+  thread.innerHTML = `
+    <article class="message assistant-message">
+      <p>Describe a task (shopping, flights, comparisons). I will generate an action plan and attempt to execute it safely.</p>
+    </article>
+  `;
+  queryInput.value = "";
+  queryInput.focus();
 });
 
