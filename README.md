@@ -77,7 +77,7 @@ Copy `.env.example` to `.env` and fill in your keys:
 
 ```bash
 # Standard run (recommended for Windows stability)
-
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir .
 
 # Alternative with auto-reload (for developers)
 python -m uvicorn app.main:app --reload
@@ -107,7 +107,7 @@ python -m uvicorn app.main:app --reload
 *   **Stealth**: The browser worker uses standard stealth headers to ensure high success rates on enterprise sites.
 
 ---
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir .
+
 ## ⚡ Task Automation Agent (New Vertical)
 
 This repo includes a second vertical: **Task Automation Agent** — focused on *executing multi-step browser workflows* (not long-form research).
@@ -157,5 +157,3 @@ Example payload (URL):
 ```json
 { "url": "https://www.amazon.in/dp/B0CHX1W1XY" }
 ```
-
-
