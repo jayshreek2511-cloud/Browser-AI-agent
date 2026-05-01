@@ -26,9 +26,8 @@ async def deals_search(payload: DealsSearchRequest, session: Session = Depends(g
     service = DealsService(session)
     controller = DealsController(service)
     try:
-        # Note: search is still async because it calls the scraper
-        results = await controller.search(query=payload.query, url=payload.url)
-        return {"status": "success", "results": results}
+        result = await controller.search(query=payload.query, url=payload.url)
+        return {"status": "success", **result}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

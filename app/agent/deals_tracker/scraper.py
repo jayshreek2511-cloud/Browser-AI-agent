@@ -483,6 +483,83 @@ def extract_product_data(html: str, *, base_url: str = "") -> list[ScrapedProduc
 
 
 # ════════════════════════════════════════════════════════════════════════
+#  FILTERING & RELATED PRODUCT UTILITIES
+# ════════════════════════════════════════════════════════════════════════
+
+_ACCESSORY_WORDS = [
+    "cover", "case", "tempered", "protector", "charger",
+    "cable", "adapter", "earbuds", "headphones", "skin",
+    "back cover", "screen guard", "glass", "pouch", "sleeve",
+    "stand", "holder", "mount", "ring", "grip", "sticker",
+    "film", "wrap", "bumper", "strap", "band", "dock",
+    "keyboard", "mouse pad", "cleaning kit",
+]
+
+_QUERY_NOISE = {
+    "under", "below", "above", "rs", "₹", "inr", "best", "cheapest",
+    "deal", "buy", "online", "india", "price", "for", "in", "the",
+    "a", "an", "of", "with", "to", "and", "or", "right", "now",
+}
+
+
+def is_primary_product(query: str, title: str) -> bool:
+    """Return True only if *title* is a real product matching *query* (not an accessory)."""
+    title_low = title.lower()
+
+    # Block accessories
+    if any(word in title_low for word in _ACCESSORY_WORDS):
+        return False
+
+    # Extract meaningful keywords from the query
+    query_low = query.lower()
+    core_keywords = [w for w in query_low.split() if w not in _QUERY_NOISE and len(w) > 1]
+
+    if not core_keywords:
+        return True  # Can't filter — allow everything
+
+    # At least one core keyword must appear in the title
+    return any(k in title_low for k in core_keywords)
+
+
+def is_valid_product_link(url: str | None) -> bool:
+    """Return True if the URL looks like a real product page (not an image or blog)."""
+    if not url:
+        return False
+    low = url.lower()
+    # Reject image/media links
+    if low.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg")):
+        return False
+    # Reject blog/article URLs
+    if any(s in low for s in ["/blog/", "/article/", "/review/", "/news/", "captcha", "/login"]):
+        return False
+    # Prefer URLs with known product path patterns
+    return True
+
+
+def build_related_query(product_name: str) -> str:
+    """Build a search query from a product name to find related listings."""
+    # Take meaningful words, skip very short ones
+    words = [w for w in product_name.split() if len(w) > 2]
+    # Limit to first 6 meaningful words to keep the query focused
+    core = " ".join(words[:6])
+    return f"{core} buy online india price"
+
+
+def filter_products(products: list[ScrapedProduct], query: str) -> list[ScrapedProduct]:
+    """Apply accessory filter + valid link check to a product list."""
+    filtered = []
+    for p in products:
+        if not is_primary_product(query, p.name):
+            continue
+        if not is_valid_product_link(p.link):
+            continue
+        if p.price <= 0:
+            continue
+        filtered.append(p)
+    return filtered
+
+
+# ════════════════════════════════════════════════════════════════════════
 #  SHARED UTILITIES
 # ════════════════════════════════════════════════════════════════════════
 

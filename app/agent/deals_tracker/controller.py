@@ -14,7 +14,7 @@ class DealsController:
     def __init__(self, service: DealsService) -> None:
         self.service = service
 
-    async def search(self, *, query: str | None = None, url: str | None = None) -> list[dict[str, Any]]:
+    async def search(self, *, query: str | None = None, url: str | None = None) -> dict[str, Any]:
         logger.info("DealsController: search query=%s url=%s", query, url)
         return await self.service.search(query=query, url=url)
 

@@ -196,3 +196,80 @@
   from { opacity: 0; transform: translateY(16px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Highlighted Main Product Card ──────────────────────────────── */
+.deal-card--main {
+  border: 2px solid rgba(79, 70, 229, .35);
+  background: linear-gradient(135deg, rgba(79, 70, 229, .04), rgba(255, 255, 255, .75));
+  box-shadow: 0 4px 16px rgba(79, 70, 229, .08);
+}
+
+/* ── Section Labels ─────────────────────────────────────────────── */
+.deals-section-label {
+  display: flex; align-items: center; gap: 8px;
+  font: 600 .88rem 'Inter', sans-serif;
+  color: var(--primary);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 8px;
+  margin-top: 4px;
+}
+
+/* ── Comparison Row Best ────────────────────────────────────────── */
+.comparison-row--best {
+  background: rgba(16, 185, 129, .06);
+  border-radius: 8px;
+  padding-left: 10px;
+  padding-right: 10px;
+  margin: 0 -10px;
+}
+
+/* ── Verdict Banner ─────────────────────────────────────────────── */
+.verdict-section {
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  margin-bottom: 12px;
+}
+.verdict-section.verdict--best {
+  background: linear-gradient(135deg, rgba(16, 185, 129, .08), rgba(16, 185, 129, .02));
+  border: 1px solid rgba(16, 185, 129, .25);
+}
+.verdict-section.verdict--better {
+  background: linear-gradient(135deg, rgba(245, 158, 11, .08), rgba(245, 158, 11, .02));
+  border: 1px solid rgba(245, 158, 11, .25);
+}
+.verdict-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+}
+.verdict--best .verdict-header .material-symbols-outlined {
+  color: #059669; font-size: 24px;
+}
+.verdict--better .verdict-header .material-symbols-outlined {
+  color: #d97706; font-size: 24px;
+}
+.verdict-header h3 {
+  font: 700 1.05rem 'Inter', sans-serif; margin: 0;
+  color: var(--on-surface);
+}
+.verdict-section p {
+  font-size: .92rem; color: var(--on-surface-variant);
+  margin: 4px 0;
+}
+.verdict-savings {
+  font-size: .85rem !important;
+  color: #059669 !important;
+  margin-top: 6px !important;
+}
+.verdict-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 10px;
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+  background: rgba(245, 158, 11, .12);
+  color: #d97706;
+  font: 500 .85rem 'Inter', sans-serif;
+  text-decoration: none;
+  transition: background var(--transition);
+}
+.verdict-link:hover { background: rgba(245, 158, 11, .22); }
+

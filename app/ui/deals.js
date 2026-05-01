@@ -35,6 +35,7 @@ function badgeClass(status) {
   switch ((status || "").toUpperCase()) {
     case "GOOD": return "good";
     case "OVERPRICED": return "overpriced";
+    case "BEST_DEAL": return "good";
     default: return "average";
   }
 }
@@ -53,54 +54,138 @@ function appendAssistantHtml(html) {
   dealsThread.scrollTop = dealsThread.scrollHeight;
 }
 
-// ── Render Results ────────────────────────────────────────────────────
+// ── Render a single product card ──────────────────────────────────────
 
-function renderDealsResults(results, query) {
-  if (!results || !results.length) {
-    const isUrl = query.startsWith("http://") || query.startsWith("https://");
-    const msg = isUrl
-      ? "Unable to extract product details from this URL. The page may be blocked or use an unsupported layout."
-      : "No products found. Try a different search.";
+function renderProductCard(r, highlight = false) {
+  const badge = `<span class="deal-badge ${badgeClass(r.deal_status)}">${esc(r.deal_status)}</span>`;
+  const ratingHtml = r.rating
+    ? `<span><span class="rating-star">★</span> ${esc(r.rating)}</span>`
+    : "";
+  const highlightClass = highlight ? " deal-card--main" : "";
+  return `
+    <div class="deal-card${highlightClass}">
+      <div class="deal-card-header">
+        <span class="deal-card-name">${esc(r.name)}</span>
+        <span class="deal-card-price">${formatPrice(r.price)}</span>
+      </div>
+      <div class="deal-card-meta">
+        ${badge}
+        ${ratingHtml}
+        <span>${esc(r.source)}</span>
+      </div>
+      <div class="deal-card-actions">
+        ${r.link ? `<a class="btn-view" href="${esc(r.link)}" target="_blank">
+          <span class="material-symbols-outlined" style="font-size:16px;">open_in_new</span> View Product
+        </a>` : ""}
+        <button class="btn-track" onclick="showHistoryAndAlert('${esc(r.product_id)}', '${esc(r.name)}')">
+          <span class="material-symbols-outlined" style="font-size:16px;">notifications</span> Track Price
+        </button>
+      </div>
+    </div>`;
+}
+
+// ── Render: URL Flow (main + related + comparison + verdict) ──────────
+
+function renderUrlFlow(payload, query) {
+  const main = payload.main_product;
+  if (!main) {
     appendAssistantHtml(`<div class="deals-empty">
       <span class="material-symbols-outlined">shopping_bag</span>
-      <p>${msg}</p>
+      <p>Unable to extract product details from this URL. The page may be blocked or use an unsupported layout.</p>
     </div>`);
     return;
   }
 
-  // 1. Product Cards
-  const cardsHtml = results.map(r => {
-    const badge = `<span class="deal-badge ${badgeClass(r.deal_status)}">${esc(r.deal_status)}</span>`;
-    const ratingHtml = r.rating
-      ? `<span><span class="rating-star">★</span> ${esc(r.rating)}</span>`
-      : "";
-    return `
-      <div class="deal-card">
-        <div class="deal-card-header">
-          <span class="deal-card-name">${esc(r.name)}</span>
-          <span class="deal-card-price">${formatPrice(r.price)}</span>
-        </div>
-        <div class="deal-card-meta">
-          ${badge}
-          ${ratingHtml}
-          <span>${esc(r.source)}</span>
-        </div>
-        <div class="deal-card-actions">
-          ${r.link ? `<a class="btn-view" href="${esc(r.link)}" target="_blank">
-            <span class="material-symbols-outlined" style="font-size:16px;">open_in_new</span> View Product
-          </a>` : ""}
-          <button class="btn-track" onclick="showHistoryAndAlert('${esc(r.product_id)}', '${esc(r.name)}')">
-            <span class="material-symbols-outlined" style="font-size:16px;">notifications</span> Track Price
-          </button>
-        </div>
-      </div>`;
-  }).join("");
-
+  // 1. Main Product (highlighted)
   appendAssistantHtml(`
-    <div class="deals-results">${cardsHtml}</div>
+    <div class="deals-section-label">
+      <span class="material-symbols-outlined" style="font-size:18px;">shopping_cart</span>
+      Product Found
+    </div>
+    <div class="deals-results">${renderProductCard(main, true)}</div>
   `);
 
-  // 2. Price Comparison
+  // 2. Related Products
+  const related = payload.related || [];
+  if (related.length > 0) {
+    const relatedCards = related.map(r => renderProductCard(r)).join("");
+    appendAssistantHtml(`
+      <div class="deals-section-label">
+        <span class="material-symbols-outlined" style="font-size:18px;">compare_arrows</span>
+        Related Products from Other Stores
+      </div>
+      <div class="deals-results">${relatedCards}</div>
+    `);
+  }
+
+  // 3. Price Comparison Table
+  const comparison = payload.comparison || [];
+  if (comparison.length > 0) {
+    const rows = comparison.map(c => {
+      const isBest = c.is_best;
+      return `<div class="comparison-row ${isBest ? 'comparison-row--best' : ''}">
+        <span class="comparison-source">
+          <span class="material-symbols-outlined" style="font-size:16px;">storefront</span>
+          ${esc(c.source)}
+        </span>
+        <span class="comparison-price ${isBest ? 'comparison-lowest' : ''}">
+          ${formatPrice(c.price)} ${isBest ? "← BEST PRICE" : ""}
+        </span>
+      </div>`;
+    }).join("");
+
+    appendAssistantHtml(`
+      <div class="comparison-section">
+        <h3><span class="material-symbols-outlined" style="font-size:20px;vertical-align:middle;">analytics</span> Price Comparison</h3>
+        ${rows}
+      </div>
+    `);
+  }
+
+  // 4. Final Verdict
+  const verdict = payload.verdict;
+  if (verdict) {
+    const isBest = verdict.status === "BEST_DEAL";
+    const icon = isBest ? "verified" : "trending_down";
+    const cls = isBest ? "verdict--best" : "verdict--better";
+    let verdictBody = `<p>${esc(verdict.message)}</p>`;
+    if (!isBest && verdict.savings) {
+      verdictBody += `<p class="verdict-savings">You could save <strong>${formatPrice(verdict.savings)}</strong></p>`;
+    }
+    if (!isBest && verdict.best_link) {
+      verdictBody += `<a class="btn-view verdict-link" href="${esc(verdict.best_link)}" target="_blank">
+        <span class="material-symbols-outlined" style="font-size:16px;">open_in_new</span> Go to Best Deal
+      </a>`;
+    }
+    appendAssistantHtml(`
+      <div class="verdict-section ${cls}">
+        <div class="verdict-header">
+          <span class="material-symbols-outlined">${icon}</span>
+          <h3>Final Verdict</h3>
+        </div>
+        ${verdictBody}
+      </div>
+    `);
+  }
+}
+
+// ── Render: Search Flow (filtered product cards) ──────────────────────
+
+function renderSearchFlow(payload, query) {
+  const results = payload.results || [];
+  if (!results.length) {
+    appendAssistantHtml(`<div class="deals-empty">
+      <span class="material-symbols-outlined">shopping_bag</span>
+      <p>No products found. Try a different search.</p>
+    </div>`);
+    return;
+  }
+
+  // Product Cards
+  const cardsHtml = results.map(r => renderProductCard(r)).join("");
+  appendAssistantHtml(`<div class="deals-results">${cardsHtml}</div>`);
+
+  // Price Comparison across sources
   const sources = {};
   let lowestPrice = Infinity;
   results.forEach(r => {
@@ -114,7 +199,7 @@ function renderDealsResults(results, query) {
   });
 
   const sourceKeys = Object.keys(sources);
-  if (sourceKeys.length > 0) {
+  if (sourceKeys.length > 1) {
     const rows = sourceKeys.map(s => {
       const isLowest = sources[s].price === lowestPrice;
       return `<div class="comparison-row">
@@ -137,10 +222,19 @@ function renderDealsResults(results, query) {
   }
 }
 
+// ── Main render dispatcher ────────────────────────────────────────────
+
+function renderDealsResponse(payload, query) {
+  if (payload.mode === "url") {
+    renderUrlFlow(payload, query);
+  } else {
+    renderSearchFlow(payload, query);
+  }
+}
+
 // ── History & Alert Panel ─────────────────────────────────────────────
 
 window.showHistoryAndAlert = async function(productId, productName) {
-  // Fetch history
   try {
     const resp = await fetch(`/api/deals/history/${productId}`);
     const data = await resp.json();
@@ -215,12 +309,12 @@ dealsForm.addEventListener("submit", async (event) => {
   dealsInput.value = "";
   dealsInput.style.height = "auto";
 
+  const isUrl = query.startsWith("http://") || query.startsWith("https://");
+
   appendAssistantHtml(`<div class="deals-loading">
     <div class="loading-spinner"></div>
-    <span>Searching for the best deals…</span>
+    <span>${isUrl ? "Analyzing product and finding best deals…" : "Searching for the best deals…"}</span>
   </div>`);
-
-  const isUrl = query.startsWith("http://") || query.startsWith("https://");
 
   try {
     const resp = await fetch("/api/deals/search", {
@@ -236,7 +330,7 @@ dealsForm.addEventListener("submit", async (event) => {
       </div>`);
       return;
     }
-    renderDealsResults(payload.results, query);
+    renderDealsResponse(payload, query);
     saveDealsHistory(query, payload);
   } catch (e) {
     appendAssistantHtml(`<div class="deals-empty">
@@ -270,7 +364,7 @@ function handleDealsHistoryLoad() {
   const entry = history.find(h => h.id === hid);
   if (entry) {
     appendUserMsg(entry.query);
-    renderDealsResults(entry.payload?.results || [], entry.query);
+    renderDealsResponse(entry.payload || {}, entry.query);
   }
 }
 handleDealsHistoryLoad();
@@ -285,6 +379,5 @@ document.getElementById("new-deals-chat").addEventListener("click", () => {
   `;
   dealsInput.value = "";
   dealsInput.focus();
-  // Clear URL params
   window.history.replaceState({}, "", window.location.pathname);
 });
