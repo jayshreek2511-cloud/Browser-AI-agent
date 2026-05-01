@@ -76,11 +76,11 @@ Copy `.env.example` to `.env` and fill in your keys:
 ### 3. Start the Application
 
 ```bash
-# Standard run (recommended for Windows stability)
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir .
+# Standard run (recommended for Windows & Database stability)
+$env:APP_ENV='production'; .venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir .
 
 # Alternative with auto-reload (for developers)
-python -m uvicorn app.main:app --reload
+$env:APP_ENV='production'; .venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000 --app-dir .
 ```
 
 4. Open `http://localhost:8000/` in your browser.
