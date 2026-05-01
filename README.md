@@ -8,12 +8,12 @@ A state-of-the-art, production-ready AI agent designed to autonomously navigate 
 
 The **General Browser AI Agent** is a multi-modal agentic system that leverages Playwright for web automation and Gemini for advanced reasoning. Unlike traditional chatbots that rely on pre-trained knowledge, this agent uses live browsing to access real-time data, verify facts across multiple sources, and produce comprehensive research reports.
 
-### The "Research" Vertical
-This version of the agent is specialized in **Deep Research**. It is optimized to:
-- Navigate complex web layouts and bypass common bot-detection.
-- Synthesize long-form reports (1000+ words) from multiple disparate sources.
-- Retrieve high-quality imagery and video recommendations related to the query.
-- Maintain a persistent "Library" of past research for future reference.
+### The "Deals Tracker" Vertical
+This version also includes a specialized **Deals & Price Tracker**. It is optimized to:
+- Extract real-time pricing and product data from top e-commerce sites (Amazon, Flipkart, etc.).
+- Filter out noise and accessories (covers, cases) to focus on primary products.
+- Provide multi-store price comparisons and a "Final Verdict" on deal quality.
+- Maintain a persistent price history and allow users to set target price alerts.
 
 ---
 
@@ -40,6 +40,7 @@ The agent follows a sophisticated, self-correcting loop to ensure accuracy and d
 - **📚 Research Library**: Automatically saves every task, screenshot, and result, allowing you to build a personal knowledge base.
 - **⚡ Parallel Execution**: Utilizes asynchronous workers to search and browse multiple sites simultaneously, drastically reducing research time without sacrificing quality.
 - **🛡️ Evidence-First Logic**: Every statement made by the agent is backed by a clickable citation and extracted evidence snippet.
+- **🏷️ Deals & Price Tracking**: Integrated price monitoring with history charts, multi-source comparison, and custom price drop alerts.
 - **🔍 Multi-Engine Support**: Integrated support for Google Custom Search, Bing Search API, and multiple privacy-focused scraping fallbacks.
 
 ---
@@ -71,7 +72,7 @@ Copy `.env.example` to `.env` and fill in your keys:
 
 ```bash
 # Standard run (recommended for Windows stability)
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir .
+
 
 # Alternative with auto-reload (for developers)
 python -m uvicorn app.main:app --reload
@@ -85,6 +86,7 @@ python -m uvicorn app.main:app --reload
 
 - **`app/agent`**: The "Brain" containing the LangGraph orchestrator, planning logic, and answer synthesis.
 - **`app/agent/task_automation`**: The "Task Automation Agent" vertical for action-oriented workflows (plan → execute → extract → compose).
+- **`app/agent/deals_tracker`**: The "Deals Tracker Agent" vertical for price extraction, comparison, and monitoring.
 - **`app/browser`**: The "Hands" managing Playwright instances, screencasting, and search execution.
 - **`app/extraction`**: Specialized logic for pulling clean data from messy HTML and YouTube.
 - **`app/ranking`**: Multi-dimensional scoring for sources and media relevance.
@@ -100,7 +102,7 @@ python -m uvicorn app.main:app --reload
 *   **Stealth**: The browser worker uses standard stealth headers to ensure high success rates on enterprise sites.
 
 ---
-
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir .
 ## ⚡ Task Automation Agent (New Vertical)
 
 This repo includes a second vertical: **Task Automation Agent** — focused on *executing multi-step browser workflows* (not long-form research).
@@ -108,7 +110,8 @@ This repo includes a second vertical: **Task Automation Agent** — focused on *
 ### UI
 - **Research Agent**: open `http://localhost:8000/` (default)
 - **Task Automation Agent**: open `http://localhost:8000/ui/task_automation.html`
-  - You can also navigate to it from the left sidebar in the Research UI.
+- **Deals & Price Tracker**: open `http://localhost:8000/ui/deals.html`
+  - You can also navigate to any vertical from the left sidebar in the main Research UI.
 
 ### API
 Run a task automation workflow via:
