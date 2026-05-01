@@ -23,30 +23,15 @@ function appendAssistantHtml(html) {
   thread.scrollTop = thread.scrollHeight;
 }
 
-function showInlineLoader(msg) {
-  const id = "loader-" + Date.now();
-  thread.insertAdjacentHTML("beforeend",
-    `<div class="loading-inline" id="${id}">
-       <div class="spinner"></div>
-       <span>${escapeHtml(msg)}</span>
-     </div>`);
-  thread.scrollTop = thread.scrollHeight;
-  return id;
-}
-
-function removeLoader(id) {
-  const el = document.getElementById(id);
-  if (el) el.remove();
-}
-
 function renderResult(payload) {
   const plan = payload?.plan;
   const output = payload?.output;
   const logs = payload?.execution?.logs || [];
   const results = output?.results || [];
 
-    ? `<h3 class="section-title">Generated Action Plan</h3>
-       <div class="automation-card" style="margin-bottom:12px;">
+  const planHtml = plan?.steps
+    ? `<div class="automation-card" style="margin-bottom:12px;">
+         <h3>Generated Action Plan</h3>
          <div class="stack">
            ${plan.steps
              .map(
@@ -89,8 +74,8 @@ function renderResult(payload) {
   }
 
   const logsHtml = logs.length
-    ? `<h3 class="section-title">Execution Log</h3>
-       <div class="automation-card" style="margin-bottom:12px;">
+    ? `<div class="automation-card" style="margin-bottom:12px;">
+         <h3>Execution Log</h3>
          <div class="code-like">${escapeHtml(
            logs
              .map((l) => `#${l.step} ${l.action} ${l.ok ? "OK" : "FAIL"} — ${l.message}`)
@@ -100,8 +85,8 @@ function renderResult(payload) {
     : "";
 
   const resultsHtml = results.length
-    ? `<h3 class="section-title">Top Results</h3>
-       <div class="automation-card">
+    ? `<div class="automation-card">
+         <h3>Top Results</h3>
          <div class="stack">
            ${results
              .map(
@@ -126,8 +111,8 @@ function renderResult(payload) {
     : `<div class="automation-card"><h3>Top Results</h3><p>No structured items extracted (site may block automation or require login).</p></div>`;
 
   const summaryHtml = output?.summary
-    ? `<h3 class="section-title">Summary</h3>
-       <div class="automation-card" style="margin-bottom:12px;">
+    ? `<div class="automation-card" style="margin-bottom:12px;">
+         <h3>Summary</h3>
          <p>${escapeHtml(output.summary)}</p>
          <p style="font-size:0.9em;color:var(--on-surface-variant)">${escapeHtml(output.reasoning || "")}</p>
        </div>`
@@ -145,7 +130,7 @@ form.addEventListener("submit", async (event) => {
   queryInput.value = "";
   queryInput.style.height = "auto";
 
-  const loaderId = showInlineLoader("Running task automation…");
+  appendAssistantHtml(`<div class="automation-card"><p>Running task automation…</p></div>`);
 
   try {
     const response = await fetch("/api/automation/run", {
@@ -153,7 +138,6 @@ form.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
     });
-    removeLoader(loaderId);
     const payload = await response.json();
     if (!response.ok) {
       appendAssistantHtml(
@@ -164,7 +148,6 @@ form.addEventListener("submit", async (event) => {
     renderResult(payload);
     saveToHistory(query, payload);
   } catch (e) {
-    removeLoader(loaderId);
     appendAssistantHtml(`<div class="automation-card"><h3>Error</h3><p>Network error.</p></div>`);
   }
 });
