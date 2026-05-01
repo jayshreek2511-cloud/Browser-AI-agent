@@ -21,3 +21,32 @@
   word-break: break-word;
 }
 
+.loading-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: #6b7280;
+  margin-bottom: 12px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #e5e7eb;
+  border-top: 2px solid #6366f1;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #4f46e5;
+  margin: 18px 0 10px;
+}
+

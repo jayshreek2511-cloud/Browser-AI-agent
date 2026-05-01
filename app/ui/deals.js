@@ -40,7 +40,7 @@ function badgeClass(status) {
   }
 }
 
-// ── User message ──────────────────────────────────────────────────────
+// ── User & Assistant messages ─────────────────────────────────────────
 
 function appendUserMsg(text) {
   dealsThread.insertAdjacentHTML("beforeend",
@@ -52,6 +52,24 @@ function appendAssistantHtml(html) {
   dealsThread.insertAdjacentHTML("beforeend",
     `<article class="message assistant-message">${html}</article>`);
   dealsThread.scrollTop = dealsThread.scrollHeight;
+}
+
+// ── Small inline loader (replaces old center spinner) ─────────────────
+
+function showInlineLoader(msg) {
+  const id = "loader-" + Date.now();
+  dealsThread.insertAdjacentHTML("beforeend",
+    `<div class="loading-inline" id="${id}">
+       <div class="spinner"></div>
+       <span>${esc(msg)}</span>
+     </div>`);
+  dealsThread.scrollTop = dealsThread.scrollHeight;
+  return id;
+}
+
+function removeLoader(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
 }
 
 // ── Render a single product card ──────────────────────────────────────
@@ -84,9 +102,11 @@ function renderProductCard(r, highlight = false) {
     </div>`;
 }
 
-// ── Render: URL Flow (main + related + comparison + verdict) ──────────
+// ════════════════════════════════════════════════════════════════════════
+//  URL FLOW — Main Product + Related + Comparison + Verdict
+// ════════════════════════════════════════════════════════════════════════
 
-function renderUrlFlow(payload, query) {
+function renderUrlFlow(payload) {
   const main = payload.main_product;
   if (!main) {
     appendAssistantHtml(`<div class="deals-empty">
@@ -96,29 +116,27 @@ function renderUrlFlow(payload, query) {
     return;
   }
 
-  // 1. Main Product (highlighted)
+  // 1. Exact Product
   appendAssistantHtml(`
-    <div class="deals-section-label">
-      <span class="material-symbols-outlined" style="font-size:18px;">shopping_cart</span>
-      Product Found
-    </div>
+    <h3 class="section-title">
+      <span class="material-symbols-outlined">shopping_cart</span> Exact Product
+    </h3>
     <div class="deals-results">${renderProductCard(main, true)}</div>
   `);
 
-  // 2. Related Products
-  const related = payload.related || [];
+  // 2. Related Products (max 5)
+  const related = (payload.related || []).slice(0, 5);
   if (related.length > 0) {
     const relatedCards = related.map(r => renderProductCard(r)).join("");
     appendAssistantHtml(`
-      <div class="deals-section-label">
-        <span class="material-symbols-outlined" style="font-size:18px;">compare_arrows</span>
-        Related Products from Other Stores
-      </div>
+      <h3 class="section-title">
+        <span class="material-symbols-outlined">compare_arrows</span> Related Products
+      </h3>
       <div class="deals-results">${relatedCards}</div>
     `);
   }
 
-  // 3. Price Comparison Table
+  // 3. Price Comparison
   const comparison = payload.comparison || [];
   if (comparison.length > 0) {
     const rows = comparison.map(c => {
@@ -129,16 +147,16 @@ function renderUrlFlow(payload, query) {
           ${esc(c.source)}
         </span>
         <span class="comparison-price ${isBest ? 'comparison-lowest' : ''}">
-          ${formatPrice(c.price)} ${isBest ? "← BEST PRICE" : ""}
+          ${formatPrice(c.price)} ${isBest ? "← BEST" : ""}
         </span>
       </div>`;
     }).join("");
 
     appendAssistantHtml(`
-      <div class="comparison-section">
-        <h3><span class="material-symbols-outlined" style="font-size:20px;vertical-align:middle;">analytics</span> Price Comparison</h3>
-        ${rows}
-      </div>
+      <h3 class="section-title">
+        <span class="material-symbols-outlined">analytics</span> Price Comparison
+      </h3>
+      <div class="comparison-section">${rows}</div>
     `);
   }
 
@@ -158,10 +176,13 @@ function renderUrlFlow(payload, query) {
       </a>`;
     }
     appendAssistantHtml(`
+      <h3 class="section-title">
+        <span class="material-symbols-outlined">emoji_events</span> Final Verdict
+      </h3>
       <div class="verdict-section ${cls}">
         <div class="verdict-header">
           <span class="material-symbols-outlined">${icon}</span>
-          <h3>Final Verdict</h3>
+          <h3>${isBest ? "Best Deal!" : "Better Deal Available"}</h3>
         </div>
         ${verdictBody}
       </div>
@@ -169,7 +190,9 @@ function renderUrlFlow(payload, query) {
   }
 }
 
-// ── Render: Search Flow (filtered product cards) ──────────────────────
+// ════════════════════════════════════════════════════════════════════════
+//  SEARCH FLOW — Filtered product cards + comparison
+// ════════════════════════════════════════════════════════════════════════
 
 function renderSearchFlow(payload, query) {
   const results = payload.results || [];
@@ -181,11 +204,30 @@ function renderSearchFlow(payload, query) {
     return;
   }
 
-  // Product Cards
-  const cardsHtml = results.map(r => renderProductCard(r)).join("");
-  appendAssistantHtml(`<div class="deals-results">${cardsHtml}</div>`);
+  // Split: first = exact product, rest = related
+  const exactProduct = results[0];
+  const relatedProducts = results.slice(1, 6);
 
-  // Price Comparison across sources
+  // 1. Exact Product
+  appendAssistantHtml(`
+    <h3 class="section-title">
+      <span class="material-symbols-outlined">shopping_cart</span> Exact Product
+    </h3>
+    <div class="deals-results">${renderProductCard(exactProduct, true)}</div>
+  `);
+
+  // 2. Related Products
+  if (relatedProducts.length > 0) {
+    const relatedCards = relatedProducts.map(r => renderProductCard(r)).join("");
+    appendAssistantHtml(`
+      <h3 class="section-title">
+        <span class="material-symbols-outlined">compare_arrows</span> Related Products
+      </h3>
+      <div class="deals-results">${relatedCards}</div>
+    `);
+  }
+
+  // 3. Price Comparison across sources
   const sources = {};
   let lowestPrice = Infinity;
   results.forEach(r => {
@@ -200,23 +242,45 @@ function renderSearchFlow(payload, query) {
 
   const sourceKeys = Object.keys(sources);
   if (sourceKeys.length > 1) {
-    const rows = sourceKeys.map(s => {
-      const isLowest = sources[s].price === lowestPrice;
-      return `<div class="comparison-row">
-        <span class="comparison-source">
-          <span class="material-symbols-outlined" style="font-size:16px;">storefront</span>
-          ${esc(s)}
-        </span>
-        <span class="comparison-price ${isLowest ? "comparison-lowest" : ""}">
-          ${formatPrice(sources[s].price)} ${isLowest ? "← Lowest" : ""}
-        </span>
-      </div>`;
-    }).join("");
+    const rows = sourceKeys
+      .sort((a, b) => sources[a].price - sources[b].price)
+      .map(s => {
+        const isLowest = sources[s].price === lowestPrice;
+        return `<div class="comparison-row ${isLowest ? 'comparison-row--best' : ''}">
+          <span class="comparison-source">
+            <span class="material-symbols-outlined" style="font-size:16px;">storefront</span>
+            ${esc(s)}
+          </span>
+          <span class="comparison-price ${isLowest ? "comparison-lowest" : ""}">
+            ${formatPrice(sources[s].price)} ${isLowest ? "← BEST" : ""}
+          </span>
+        </div>`;
+      }).join("");
 
     appendAssistantHtml(`
-      <div class="comparison-section">
-        <h3>Price Comparison</h3>
-        ${rows}
+      <h3 class="section-title">
+        <span class="material-symbols-outlined">analytics</span> Price Comparison
+      </h3>
+      <div class="comparison-section">${rows}</div>
+    `);
+  }
+
+  // 4. Quick Verdict for search
+  if (results.length > 1) {
+    const best = results.reduce((a, b) => (a.price <= b.price ? a : b));
+    appendAssistantHtml(`
+      <h3 class="section-title">
+        <span class="material-symbols-outlined">emoji_events</span> Final Verdict
+      </h3>
+      <div class="verdict-section verdict--best">
+        <div class="verdict-header">
+          <span class="material-symbols-outlined">verified</span>
+          <h3>Best Deal Found</h3>
+        </div>
+        <p><strong>${esc(best.name)}</strong> at <strong>${formatPrice(best.price)}</strong> on ${esc(best.source)}</p>
+        ${best.link ? `<a class="btn-view verdict-link" href="${esc(best.link)}" target="_blank" style="background:rgba(16,185,129,.12);color:#059669;">
+          <span class="material-symbols-outlined" style="font-size:16px;">open_in_new</span> Go to Best Deal
+        </a>` : ""}
       </div>
     `);
   }
@@ -226,7 +290,7 @@ function renderSearchFlow(payload, query) {
 
 function renderDealsResponse(payload, query) {
   if (payload.mode === "url") {
-    renderUrlFlow(payload, query);
+    renderUrlFlow(payload);
   } else {
     renderSearchFlow(payload, query);
   }
@@ -310,11 +374,12 @@ dealsForm.addEventListener("submit", async (event) => {
   dealsInput.style.height = "auto";
 
   const isUrl = query.startsWith("http://") || query.startsWith("https://");
+  const loaderMsg = isUrl
+    ? "Analyzing product and finding best deals…"
+    : "Searching for the best deals…";
 
-  appendAssistantHtml(`<div class="deals-loading">
-    <div class="loading-spinner"></div>
-    <span>${isUrl ? "Analyzing product and finding best deals…" : "Searching for the best deals…"}</span>
-  </div>`);
+  // Small left-aligned inline loader (no large center spinner)
+  const loaderId = showInlineLoader(loaderMsg);
 
   try {
     const resp = await fetch("/api/deals/search", {
@@ -322,6 +387,7 @@ dealsForm.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(isUrl ? { url: query } : { query }),
     });
+    removeLoader(loaderId);
     const payload = await resp.json();
     if (!resp.ok) {
       appendAssistantHtml(`<div class="deals-empty">
@@ -333,6 +399,7 @@ dealsForm.addEventListener("submit", async (event) => {
     renderDealsResponse(payload, query);
     saveDealsHistory(query, payload);
   } catch (e) {
+    removeLoader(loaderId);
     appendAssistantHtml(`<div class="deals-empty">
       <span class="material-symbols-outlined">wifi_off</span>
       <p>Network error. Please try again.</p>

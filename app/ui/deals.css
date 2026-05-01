@@ -3,6 +3,43 @@
    Matches existing cream theme from styles.css
    =================================================================== */
 
+/* ── Inline Loading (small left-aligned) ────────────────────────── */
+.loading-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 400 .88rem 'Inter', sans-serif;
+  color: #6b7280;
+  margin-bottom: 12px;
+  padding: 8px 0;
+}
+.loading-inline .spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #e5e7eb;
+  border-top: 2px solid #6366f1;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Section Titles ─────────────────────────────────────────────── */
+.section-title {
+  font: 600 .95rem 'Inter', sans-serif;
+  color: #4f46e5;
+  margin: 18px 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: .01em;
+}
+.section-title .material-symbols-outlined {
+  font-size: 18px;
+}
+
 /* ── Deal Badge ──────────────────────────────────────────────────── */
 .deal-badge {
   display: inline-flex; align-items: center;
@@ -77,6 +114,13 @@
 }
 .btn-track:hover { background: rgba(13, 148, 136, .16); }
 
+/* ── Highlighted Main Product Card ──────────────────────────────── */
+.deal-card--main {
+  border: 2px solid rgba(79, 70, 229, .35);
+  background: linear-gradient(135deg, rgba(79, 70, 229, .04), rgba(255, 255, 255, .75));
+  box-shadow: 0 4px 16px rgba(79, 70, 229, .08);
+}
+
 /* ── Comparison Table ────────────────────────────────────────────── */
 .comparison-section {
   border: 1px solid var(--outline-variant);
@@ -104,6 +148,13 @@
 }
 .comparison-lowest {
   color: #059669; font-weight: 700;
+}
+.comparison-row--best {
+  background: rgba(16, 185, 129, .06);
+  border-radius: 8px;
+  padding-left: 10px;
+  padding-right: 10px;
+  margin: 0 -10px;
 }
 
 /* ── Price History ────────────────────────────────────────────────── */
@@ -168,7 +219,7 @@
   display: flex; flex-direction: column; gap: 12px;
 }
 
-/* ── Empty / Loading states ──────────────────────────────────────── */
+/* ── Empty state ─────────────────────────────────────────────────── */
 .deals-empty {
   text-align: center; padding: 40px 20px;
   color: var(--muted); font-size: .9rem;
@@ -177,9 +228,9 @@
   font-size: 48px; display: block; margin-bottom: 12px;
 }
 
+/* ── OLD center loading — HIDDEN ─────────────────────────────────── */
 .deals-loading {
-  display: flex; align-items: center; justify-content: center; gap: 12px;
-  padding: 30px; color: var(--muted); font-size: .9rem;
+  display: none !important;
 }
 
 /* ── Toast notification ──────────────────────────────────────────── */
@@ -195,33 +246,6 @@
 @keyframes toastIn {
   from { opacity: 0; transform: translateY(16px); }
   to   { opacity: 1; transform: translateY(0); }
-}
-
-/* ── Highlighted Main Product Card ──────────────────────────────── */
-.deal-card--main {
-  border: 2px solid rgba(79, 70, 229, .35);
-  background: linear-gradient(135deg, rgba(79, 70, 229, .04), rgba(255, 255, 255, .75));
-  box-shadow: 0 4px 16px rgba(79, 70, 229, .08);
-}
-
-/* ── Section Labels ─────────────────────────────────────────────── */
-.deals-section-label {
-  display: flex; align-items: center; gap: 8px;
-  font: 600 .88rem 'Inter', sans-serif;
-  color: var(--primary);
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  margin-bottom: 8px;
-  margin-top: 4px;
-}
-
-/* ── Comparison Row Best ────────────────────────────────────────── */
-.comparison-row--best {
-  background: rgba(16, 185, 129, .06);
-  border-radius: 8px;
-  padding-left: 10px;
-  padding-right: 10px;
-  margin: 0 -10px;
 }
 
 /* ── Verdict Banner ─────────────────────────────────────────────── */
@@ -272,4 +296,3 @@
   transition: background var(--transition);
 }
 .verdict-link:hover { background: rgba(245, 158, 11, .22); }
-
