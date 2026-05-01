@@ -8,12 +8,12 @@ A state-of-the-art, production-ready AI agent designed to autonomously navigate 
 
 The **General Browser AI Agent** is a multi-modal agentic system that leverages Playwright for web automation and Gemini for advanced reasoning. Unlike traditional chatbots that rely on pre-trained knowledge, this agent uses live browsing to access real-time data, verify facts across multiple sources, and produce comprehensive research reports.
 
-### The "Deals Tracker" Vertical
-This version also includes a specialized **Deals & Price Tracker**. It is optimized to:
-- Extract real-time pricing and product data from top e-commerce sites (Amazon, Flipkart, etc.).
-- Filter out noise and accessories (covers, cases) to focus on primary products.
-- Provide multi-store price comparisons and a "Final Verdict" on deal quality.
-- Maintain a persistent price history and allow users to set target price alerts.
+### The "Research" Vertical
+This version of the agent is specialized in **Deep Research**. It is optimized to:
+- Navigate complex web layouts and bypass common bot-detection.
+- Synthesize long-form reports (1000+ words) from multiple disparate sources.
+- Retrieve high-quality imagery and video recommendations related to the query.
+- Maintain a persistent "Library" of past research for future reference.
 
 ---
 
@@ -40,7 +40,6 @@ The agent follows a sophisticated, self-correcting loop to ensure accuracy and d
 - **📚 Research Library**: Automatically saves every task, screenshot, and result, allowing you to build a personal knowledge base.
 - **⚡ Parallel Execution**: Utilizes asynchronous workers to search and browse multiple sites simultaneously, drastically reducing research time without sacrificing quality.
 - **🛡️ Evidence-First Logic**: Every statement made by the agent is backed by a clickable citation and extracted evidence snippet.
-- **🏷️ Deals & Price Tracking**: Integrated price monitoring with history charts, multi-source comparison, and custom price drop alerts.
 - **🔍 Multi-Engine Support**: Integrated support for Google Custom Search, Bing Search API, and multiple privacy-focused scraping fallbacks.
 
 ---
@@ -86,7 +85,6 @@ python -m uvicorn app.main:app --reload
 
 - **`app/agent`**: The "Brain" containing the LangGraph orchestrator, planning logic, and answer synthesis.
 - **`app/agent/task_automation`**: The "Task Automation Agent" vertical for action-oriented workflows (plan → execute → extract → compose).
-- **`app/agent/deals_tracker`**: The "Deals Tracker Agent" vertical for price extraction, comparison, and monitoring.
 - **`app/browser`**: The "Hands" managing Playwright instances, screencasting, and search execution.
 - **`app/extraction`**: Specialized logic for pulling clean data from messy HTML and YouTube.
 - **`app/ranking`**: Multi-dimensional scoring for sources and media relevance.
@@ -110,8 +108,7 @@ This repo includes a second vertical: **Task Automation Agent** — focused on *
 ### UI
 - **Research Agent**: open `http://localhost:8000/` (default)
 - **Task Automation Agent**: open `http://localhost:8000/ui/task_automation.html`
-- **Deals & Price Tracker**: open `http://localhost:8000/ui/deals.html`
-  - You can also navigate to any vertical from the left sidebar in the main Research UI.
+  - You can also navigate to it from the left sidebar in the Research UI.
 
 ### API
 Run a task automation workflow via:
@@ -122,4 +119,36 @@ Example payload:
 ```json
 { "query": "Find laptops under 80000 with 16GB RAM" }
 ```
+
+---
+
+## 🏷️ Deals & Price Tracker Agent (New Vertical)
+
+The **Deals & Price Tracker** is a specialized vertical designed to find the best prices across major e-commerce platforms (Amazon, Flipkart, Croma, etc.) and track price history.
+
+### Key Features
+- **URL-Based Extraction**: Paste a direct product URL to extract clean name, price, and rating.
+- **Price Comparison**: Automatically finds the same product on other stores to compare prices.
+- **Smart Filtering**: Built-in logic to strictly filter out accessories (covers, cables, etc.) and focus on the primary product.
+- **Final Verdict**: Provides a "BEST DEAL" badge or suggests a better source with potential savings.
+- **Price Tracking & Alerts**: Set a target price and get notified when it drops below your threshold.
+
+### UI
+- **Deals Tracker**: open `http://localhost:8000/ui/deals.html`
+  - Accessible via the "Deals Tracker" link in the sidebar.
+
+### API
+Search or extract from URL via:
+- `POST /api/deals/search`
+
+Example payload (Query):
+```json
+{ "query": "iphone 15 under 70000" }
+```
+
+Example payload (URL):
+```json
+{ "url": "https://www.amazon.in/dp/B0CHX1W1XY" }
+```
+
 
