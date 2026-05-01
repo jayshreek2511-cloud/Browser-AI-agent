@@ -57,9 +57,13 @@ function appendAssistantHtml(html) {
 
 function renderDealsResults(results, query) {
   if (!results || !results.length) {
+    const isUrl = query.startsWith("http://") || query.startsWith("https://");
+    const msg = isUrl
+      ? "Unable to extract product details from this URL. The page may be blocked or use an unsupported layout."
+      : "No products found. Try a different search.";
     appendAssistantHtml(`<div class="deals-empty">
       <span class="material-symbols-outlined">shopping_bag</span>
-      <p>No products found. Try a different search.</p>
+      <p>${msg}</p>
     </div>`);
     return;
   }
