@@ -15,6 +15,12 @@ This version of the agent is specialized in **Deep Research**. It is optimized t
 - Retrieve high-quality imagery and video recommendations related to the query.
 - Maintain a persistent "Library" of past research for future reference.
 
+### The "Task Automation" Vertical
+Focused on **Executing Actions**. It takes a high-level query, plans a sequence of browser actions, and executes them to achieve a goal.
+
+### The "Deals Tracker" Vertical
+Specialized in **E-commerce & Price Analysis**. It compares prices across multiple Indian retailers, filters out junk/accessories, and tracks price history.
+
 ---
 
 ## 🚀 How It Works: The Agentic Process
@@ -84,12 +90,13 @@ python -m uvicorn app.main:app --reload
 ## 🏗️ Architecture
 
 - **`app/agent`**: The "Brain" containing the LangGraph orchestrator, planning logic, and answer synthesis.
-- **`app/agent/task_automation`**: The "Task Automation Agent" vertical for action-oriented workflows (plan → execute → extract → compose).
+- **`app/agent/task_automation`**: The "Task Automation Agent" vertical for action-oriented workflows.
+- **`app/agent/deals_tracker`**: The "Deals & Price Tracker" vertical for price extraction, comparison, and alerting.
 - **`app/browser`**: The "Hands" managing Playwright instances, screencasting, and search execution.
 - **`app/extraction`**: Specialized logic for pulling clean data from messy HTML and YouTube.
 - **`app/ranking`**: Multi-dimensional scoring for sources and media relevance.
 - **`app/ui`**: A modern, responsive frontend built for real-time observation.
-- **`app/storage`**: SQLModel/SQLite persistence for tasks, actions, and media.
+- **`app/storage`**: SQLModel/SQLite persistence for tasks, actions, prices, and alerts.
 
 ---
 
