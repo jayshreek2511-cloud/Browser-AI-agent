@@ -1,4 +1,4 @@
-# 🧠 General Browser AI Agent
+# 🧠 MultiAgent Browser AI System
 
 A state-of-the-art, production-ready AI agent designed to autonomously navigate the web, synthesize information, and provide evidence-backed answers. Built with a "human-in-the-loop" transparency mindset, this agent doesn't just give answers—it shows you exactly how it found them.
 
